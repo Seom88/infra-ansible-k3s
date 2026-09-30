@@ -34,6 +34,7 @@
     - name: Install the Helm CLI
       ansible.builtin.command: bash /tmp/get-helm-3
       when: base_helm_probe.rc != 0
+      changed_when: true
 
     - name: Install kernel-modules-extra pinned to the running kernel
       ansible.builtin.dnf:
