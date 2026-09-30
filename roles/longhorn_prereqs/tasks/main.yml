@@ -19,19 +19,59 @@
       vars:
         longhorn_modules_to_load: "{{ longhorn_kernel_modules }}"
 
-    - name: Load the Longhorn kernel modules before the packages are installed
-      community.general.modprobe:
-        name: "{{ item }}"
-        state: present
-      loop: "{{ longhorn_kernel_modules }}"
-      loop_control:
-        label: "{{ item }}"
-      failed_when: false
-
+    # The packages come first: modinfo below must see any module a package ships,
+    # otherwise a module that only exists after installation is misreported as
+    # missing for the running kernel (a false "reboot required").
     - name: Install the Longhorn host packages
       ansible.builtin.dnf:
         name: "{{ longhorn_packages }}"
         state: present
+
+    - name: Check which Longhorn modules exist for the kernel running right now
+      ansible.builtin.command:
+        cmd: modinfo -k {{ ansible_facts['kernel'] }} -F filename {{ item }}
+      loop: "{{ longhorn_kernel_modules }}"
+      loop_control:
+        label: "{{ item }}"
+      register: longhorn_prereqs_modinfo
+      changed_when: false
+      failed_when: false
+
+    - name: Read the list of modules compiled into the running kernel
+      ansible.builtin.slurp:
+        src: "/lib/modules/{{ ansible_facts['kernel'] }}/modules.builtin"
+      register: longhorn_prereqs_builtin_scan
+      failed_when: false
+      changed_when: false
+
+    - name: Collect the names of the modules compiled into the running kernel
+      ansible.builtin.set_fact:
+        longhorn_prereqs_builtin_names: >-
+          {{ (longhorn_prereqs_builtin_scan.content | default('') | b64decode).splitlines()
+             | map('regex_replace', '^.*/', '')
+             | map('regex_replace', '\.ko(\..*)?$', '')
+             | map('regex_replace', '-', '_') | list }}
+
+    - name: List the Longhorn modules that are not available for this kernel
+      ansible.builtin.set_fact:
+        longhorn_prereqs_modules_missing: >-
+          {{ longhorn_prereqs_modinfo.results
+             | selectattr('rc', 'ne', 0) | map(attribute='item') | list
+             | difference(longhorn_prereqs_builtin_names) }}
+
+    - name: Record whether a reboot is required before every module can load
+      ansible.builtin.set_fact:
+        longhorn_prereqs_reboot_required: "{{ longhorn_prereqs_modules_missing | length > 0 }}"
+
+    # No failed_when here on purpose: a load that fails must surface as a failed
+    # task with modprobe's own error instead of being silently swallowed.
+    - name: Load the Longhorn kernel modules that are available for this kernel
+      community.general.modprobe:
+        name: "{{ item }}"
+        state: present
+      loop: "{{ longhorn_kernel_modules | difference(longhorn_prereqs_modules_missing) }}"
+      loop_control:
+        label: "{{ item }}"
 
     - name: Find the filesystem that backs the Longhorn data path
       ansible.builtin.command:
@@ -68,20 +108,37 @@
       changed_when: false
       failed_when: false
 
-    - name: Record which Longhorn modules are loaded right now
+    # lsmod lines are "name size refcount used_by", so only the first column may
+    # be compared against bare module names; built-in modules never appear in
+    # lsmod at all, so they are added from modules.builtin.
+    - name: Collect the names of the modules loaded or built into this kernel
+      ansible.builtin.set_fact:
+        longhorn_prereqs_usable_module_names: >-
+          {{ (longhorn_prereqs_loaded_modules.stdout_lines | default([]))
+             | map('regex_replace', '\s.*$', '')
+             | list
+             | union(longhorn_prereqs_builtin_names) }}
+
+    - name: Record which Longhorn modules are usable on this node
       ansible.builtin.set_fact:
         longhorn_prereqs_modules_loaded: >-
           {{ longhorn_kernel_modules
-             | select('in', longhorn_prereqs_loaded_modules.stdout_lines | default([]))
+             | select('in', longhorn_prereqs_usable_module_names)
              | list }}
 
-    - name: Fail if a Longhorn kernel module is not loaded on this node
+    - name: Fail if a Longhorn kernel module is neither loaded nor built in
       ansible.builtin.assert:
         that:
           - longhorn_prereqs_modules_loaded | length == longhorn_kernel_modules | length
         fail_msg: >-
-          Longhorn kernel module(s) {{ longhorn_kernel_modules | difference(longhorn_prereqs_modules_loaded) | join(', ') }} are not loaded;
-          check 'modinfo -k {{ ansible_facts['kernel'] }}' and reboot if needed.
+          {% if longhorn_prereqs_modules_missing | length > 0 %}
+          Longhorn kernel module(s) {{ longhorn_prereqs_modules_missing | join(', ') }} do not exist for
+          kernel {{ ansible_facts['kernel'] }}; reboot the node, then re-run this playbook.
+          {% else %}
+          Longhorn kernel module(s) {{ longhorn_kernel_modules | difference(longhorn_prereqs_modules_loaded) | join(', ') }}
+          exist for kernel {{ ansible_facts['kernel'] }} but are not loaded; check the modprobe task output
+          above, or run 'modprobe <module>' on the node to see the real error.
+          {% endif %}
 
     - name: Read the installed version of each Longhorn package
       ansible.builtin.package_facts:
