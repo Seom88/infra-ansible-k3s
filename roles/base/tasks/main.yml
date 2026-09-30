@@ -1,0 +1,60 @@
+- name: Configure the base OS layer
+  when: base_role_enabled | bool
+  block:
+
+    - name: Refuse to run on a distribution this repository was not written for
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['os_family'] == 'RedHat'
+          - ansible_facts['distribution'] == 'AlmaLinux'
+          - ansible_facts['distribution_major_version'] in base_supported_major_versions
+        fail_msg: >-
+          This repository targets AlmaLinux {{ base_supported_major_versions | join(' and ') }},
+          not {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }}.
+
+    - name: Install the base packages
+      ansible.builtin.dnf:
+        name: "{{ base_packages }}"
+        state: present
+
+    - name: Install kernel-modules-extra pinned to the running kernel
+      ansible.builtin.dnf:
+        name: "{{ base_kernel_modules_extra_package }}-{{ ansible_facts['kernel'] }}"
+        state: present
+      register: base_kernel_modules_extra_pinned
+      failed_when: false
+      when: >-
+        kernel_modules_extra_required_major is defined
+        and ansible_facts['distribution_major_version'] | int
+        >= kernel_modules_extra_required_major | int
+
+    - name: Fall back to the unversioned kernel-modules-extra package
+      ansible.builtin.dnf:
+        name: "{{ base_kernel_modules_extra_package }}"
+        state: present
+      when: base_kernel_modules_extra_pinned.failed | default(false) | bool
+
+    - name: Enable and start the time synchronisation service
+      ansible.builtin.systemd:
+        name: "{{ base_time_sync_service }}"
+        enabled: true
+        state: started
+
+    - name: Record the AlmaLinux major version detected on this node
+      ansible.builtin.set_fact:
+        base_alma_major_version: "{{ ansible_facts['distribution_major_version'] }}"
+
+    - name: Look for the cgroup v2 marker file
+      ansible.builtin.stat:
+        path: "{{ base_cgroup_v2_marker }}"
+      register: base_cgroup_v2_probe
+
+    - name: Record the cgroup version the node is running
+      ansible.builtin.set_fact:
+        base_cgroup_version: "{{ 2 if base_cgroup_v2_probe.stat.exists else 1 }}"
+
+    - name: Record the SELinux enforcement status
+      ansible.builtin.set_fact:
+        base_selinux_status: >-
+          {{ ansible_facts['selinux']['status'] | default('disabled', true)
+             if ansible_facts['selinux'] | default(false) else 'disabled' }}

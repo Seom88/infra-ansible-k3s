@@ -1,0 +1,26 @@
+---
+galaxy_info:
+  role_name: firewalld
+  namespace: infra_k3s
+  author: infra-k3s
+  description: >-
+    Configures (never disables) the host firewall for an AlmaLinux k3s node:
+    k3s and Cilium ports, pod/service/Tailscale trusted sources, and
+    masquerading.
+  license: MIT
+
+  min_ansible_version: "2.19"
+  platforms:
+    - name: EL
+      versions:
+        - "9"
+        - "10"
+  galaxy_tags:
+    - alma
+    - almalinux
+    - rhel
+    - firewalld
+    - firewall
+    - k3s
+
+dependencies: []

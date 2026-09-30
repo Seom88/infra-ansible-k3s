@@ -1,0 +1,16 @@
+cilium_chart_repo_name: cilium
+cilium_chart_repo_url: https://helm.cilium.io/
+cilium_chart_name: cilium
+cilium_chart_version: "1.20.2"
+
+cilium_release_name: cilium
+
+cilium_namespace: kube-system
+
+cilium_helm_binary: helm
+cilium_kubeconfig: /etc/rancher/k3s/k3s.yaml
+cilium_kube_context: default
+
+cilium_wait: true
+cilium_wait_timeout: 600s
+cilium_history_max: 10

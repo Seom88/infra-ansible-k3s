@@ -1,0 +1,234 @@
+# ArgoCD — keep NetworkPolicy ENABLED (Cilium enforces; Flannel ignored)
+# Do NOT set global.networkPolicy.create to false — Cilium strict enforcement requires explicit allows
+# for kube-apiserver/host (port-forward) and tailscale gateway (ts-ingress).
+global:
+  networkPolicy:
+    create: true
+    defaultDenyIngress: false
+
+controller:
+  replicas: 2
+
+server:
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+
+repoServer:
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+
+applicationSet:
+  replicas: 2
+
+# ArgoCD Helm chart values
+configs:
+  params:
+    # Gateway strip mode — ArgoCD served at /argocd via my-cluster gateway, keep insecure for http proxy
+    server.insecure: "true"
+  cm:
+    # Custom health checks
+    resource.customizations: |
+      argoproj.io/Application:
+        health.lua: |
+          hs = {}
+          hs.status = "Progressing"
+          hs.message = ""
+          if obj.status == nil then
+            return hs
+          end
+          local syncStatus = obj.status.sync and obj.status.sync.status or "OutOfSync"
+          local healthStatus = obj.status.health and obj.status.health.status or "Progressing"
+          local healthMessage = obj.status.health and obj.status.health.message or ""
+          -- wave-policy controls wave gating:
+          --  "healthy" (default): wave needs Synced + Healthy
+          --  "sync-only": wave needs only Synced (ignores Healthy/Degraded)
+          -- Set via label wave-policy or annotation argocd.argoproj.io/wave-policy
+          local policy = "healthy"
+          if obj.metadata ~= nil then
+            if obj.metadata.labels ~= nil and obj.metadata.labels["wave-policy"] ~= nil then
+              policy = obj.metadata.labels["wave-policy"]
+            elseif obj.metadata.annotations ~= nil and obj.metadata.annotations["argocd.argoproj.io/wave-policy"] ~= nil then
+              policy = obj.metadata.annotations["argocd.argoproj.io/wave-policy"]
+            end
+          end
+          if policy == "sync-only" then
+            if syncStatus == "Synced" then
+              hs.status = "Healthy"
+              hs.message = "Sync-only policy: Synced is sufficient"
+            else
+              hs.status = "Progressing"
+              hs.message = "Waiting for sync (" .. syncStatus .. ")"
+            end
+            return hs
+          end
+          -- default: healthy policy — need both Synced and Healthy
+          if healthStatus == "Degraded" then
+            hs.status = "Degraded"
+            hs.message = healthMessage ~= "" and healthMessage or "Application degraded"
+          elseif healthStatus == "Healthy" and syncStatus == "Synced" then
+            hs.status = "Healthy"
+            hs.message = "Application healthy and synced"
+          else
+            hs.status = "Progressing"
+            if syncStatus ~= "Synced" then
+              hs.message = "Waiting for sync (" .. syncStatus .. ")"
+            else
+              hs.message = healthMessage ~= "" and healthMessage or "Application progressing"
+            end
+          end
+          return hs
+      external-secrets.io/ClusterSecretStore:
+        health.lua: |
+          hs = {}
+          hs.status = "Progressing"
+          hs.message = "Waiting for ClusterSecretStore to be ready"
+          if obj.status ~= nil then
+            for _, condition in ipairs(obj.status.conditions or {}) do
+              if condition.type == "Ready" then
+                if condition.status == "True" then
+                  hs.status = "Healthy"
+                  hs.message = "ClusterSecretStore is ready"
+                else
+                  hs.status = "Degraded"
+                  hs.message = condition.message or "ClusterSecretStore not ready"
+                end
+                return hs
+              end
+            end
+          end
+          return hs
+      external-secrets.io/ExternalSecret:
+        health.lua: |
+          hs = {}
+          hs.status = "Progressing"
+          hs.message = "Waiting for ExternalSecret to sync"
+          if obj.status ~= nil then
+            for _, condition in ipairs(obj.status.conditions or {}) do
+              if condition.type == "Ready" then
+                if condition.status == "True" then
+                  hs.status = "Healthy"
+                  hs.message = "ExternalSecret synced successfully"
+                else
+                  hs.status = "Degraded"
+                  hs.message = condition.message or "ExternalSecret sync failed"
+                end
+                return hs
+              end
+            end
+          end
+          return hs
+
+      monitoring.coreos.com/Prometheus:
+        health.lua: |
+          hs = {}
+          if obj.status == nil then
+            hs.status = "Progressing"
+            hs.message = "Prometheus instance initializing"
+            return hs
+          end
+          if obj.status.conditions ~= nil then
+            for i, condition in ipairs(obj.status.conditions) do
+              if condition.type == "Available" then
+                if condition.status == "True" then
+                  hs.status = "Healthy"
+                  hs.message = "Prometheus available"
+                  return hs
+                else
+                  hs.status = "Progressing"
+                  hs.message = condition.message or "Prometheus not yet available"
+                  return hs
+                end
+              end
+              if condition.type == "Reconciled" and condition.status == "False" then
+                hs.status = "Degraded"
+                hs.message = condition.message or "Reconciliation failed"
+                return hs
+              end
+            end
+          end
+          if obj.status.availableReplicas ~= nil and obj.status.availableReplicas > 0 then
+            hs.status = "Healthy"
+            hs.message = obj.status.availableReplicas .. " replica(s) available"
+          else
+            hs.status = "Progressing"
+            hs.message = "Waiting for replicas"
+          end
+          return hs
+
+# Cilium-aware complements to the chart's default K8s NetworkPolicies.
+# Flannel ignored NetworkPolicy; Cilium enforces. The chart's 6 default
+# NetworkPolicies remain (global.networkPolicy.create=true, allow-all on
+# argocd-server but restrictive on repo-server/dex/redis/etc). These
+# CiliumNetworkPolicies inject explicit allows for:
+#  1) kubectl port-forward / exec / logs (kube-apiserver + host/remote-node)
+#  2) Tailscale gateway ts-ingress (cluster-gateway in tailscale ns) -> argocd-server
+# Injected via extraObjects so fix lives in infra (correct ownership), not gitops.
+# Vault's CiliumNetworkPolicy pattern (vault-allow-ingress-cilium) is the reference.
+extraObjects:
+  # 1) Port-forward / exec / logs — allow kube-apiserver/host/remote-node to all argocd pods
+  # Mirrors vault-allow-ingress-cilium's fromEntities host/remote-node/kube-apiserver.
+  # Ports: 8080 (server containerPort), 8083 (server metrics containerPort), 8082 (controller metrics)
+  # Service ports 80/443 map to targetPort 8080 post-DNAT — do NOT allow 80/443 on pod ports.
+  # No egress — ingress only. endpointSelector {} = all pods in namespace argocd.
+  - apiVersion: cilium.io/v2
+    kind: CiliumNetworkPolicy
+    metadata:
+      name: argocd-allow-ingress-portforward
+      namespace: argocd
+    spec:
+      endpointSelector: {}
+      ingress:
+        - fromEntities:
+            - kube-apiserver
+            - host
+            - remote-node
+          toPorts:
+            - ports:
+                - port: "8080"
+                  protocol: TCP
+                - port: "8083"
+                  protocol: TCP
+                - port: "8082"
+                  protocol: TCP
+  # 2) Tailscale gateway -> argocd-server — allow ts-ingress cluster-gateway in tailscale ns
+  # Gateway: cluster-gateway (app.kubernetes.io/name=cluster-gateway) in namespace tailscale
+  # Chart: platform/ts-ingress (hybrid gateway my-cluster) proxies
+  #   https://my-cluster.lonk-mirfak.ts.net/argocd/ -> http://argocd-server.argocd.svc.cluster.local:80/ (port 80 -> target 8080)
+  # Cilium strict: narrow label selectors break on drift — provide precise label match + namespace-only fallback + fromEntities cluster.
+  # endpointSelector narrowed to argocd-server only (not all pods) — principle of least privilege.
+  - apiVersion: cilium.io/v2
+    kind: CiliumNetworkPolicy
+    metadata:
+      name: argocd-allow-ingress-tailscale
+      namespace: argocd
+    spec:
+      endpointSelector:
+        matchLabels:
+          app.kubernetes.io/name: argocd-server
+      ingress:
+        # Precise gateway pod — match both namespace and app label (ts-ingress gateway-deployment.yaml)
+        - fromEndpoints:
+            - matchLabels:
+                k8s:io.kubernetes.pod.namespace: tailscale
+                k8s:app.kubernetes.io/name: cluster-gateway
+          toPorts:
+            - ports:
+                - port: "8080"
+                  protocol: TCP
+        # Fallback namespace-only (label drift resilient, mirrors ts-ingress allow-egress pattern)
+        - fromEndpoints:
+            - matchLabels:
+                k8s:io.kubernetes.pod.namespace: tailscale
+          toPorts:
+            - ports:
+                - port: "8080"
+                  protocol: TCP
+        # Fallback cluster entity (covers Cilium kubeProxyReplacement=strict, Tailscale encap, hostNetwork proxied)
+        - fromEntities:
+            - cluster
+          toPorts:
+            - ports:
+                - port: "8080"
+                  protocol: TCP

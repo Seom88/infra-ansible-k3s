@@ -1,0 +1,24 @@
+galaxy_info:
+  role_name: cilium
+  namespace: infra_k3s
+  author: infra-k3s
+  description: >-
+    Installs the Cilium CNI from the pinned upstream Helm chart, on the k3s
+    server, after k3s has been installed with flannel-backend: none.
+  license: MIT
+  min_ansible_version: "2.19"
+  platforms:
+    - name: EL
+      versions:
+        - "9"
+        - "10"
+  galaxy_tags:
+    - alma
+    - almalinux
+    - rhel
+    - kubernetes
+    - cni
+    - cilium
+    - helm
+
+dependencies: []

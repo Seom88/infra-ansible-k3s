@@ -1,0 +1,86 @@
+- name: Build the full list of kernel modules this node requires
+  ansible.builtin.set_fact:
+    kernel_modules_required: "{{ kernel_modules_k3s + kernel_modules_additional }}"
+
+- name: Persist the required modules so they are loaded again on boot
+  ansible.builtin.template:
+    src: k3s.conf.j2
+    dest: "{{ kernel_modules_load_dir }}/{{ kernel_modules_conf_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+  vars:
+    kernel_modules_to_load: "{{ kernel_modules_required }}"
+
+- name: Check which required modules exist for the kernel running right now
+  ansible.builtin.command:
+    cmd: modinfo -k {{ ansible_facts['kernel'] }} -F filename {{ item }}
+  loop: "{{ kernel_modules_required }}"
+  loop_control:
+    label: "{{ item }}"
+  register: kernel_modules_modinfo
+  changed_when: false
+  failed_when: false
+
+- name: Read the list of modules compiled into the running kernel
+  ansible.builtin.slurp:
+    src: "/lib/modules/{{ ansible_facts['kernel'] }}/modules.builtin"
+  register: kernel_modules_builtin_scan
+  failed_when: false
+  changed_when: false
+
+- name: Collect the names of the modules compiled into the running kernel
+  ansible.builtin.set_fact:
+    kernel_modules_builtin_names: >-
+      {{ (kernel_modules_builtin_scan.content | default('') | b64decode).splitlines()
+         | map('regex_replace', '^.*/', '')
+         | map('regex_replace', '\.ko(\..*)?$', '')
+         | map('regex_replace', '-', '_') | list }}
+
+- name: List the required modules that are not available for the running kernel
+  ansible.builtin.set_fact:
+    kernel_modules_missing: >-
+      {{ kernel_modules_modinfo.results
+         | selectattr('rc', 'ne', 0) | map(attribute='item') | list
+         | difference(kernel_modules_builtin_names) }}
+
+- name: Record whether a reboot is required before every module can be loaded
+  ansible.builtin.set_fact:
+    kernel_modules_reboot_required: "{{ kernel_modules_missing | length > 0 }}"
+
+- name: Load the kernel modules that are available for the running kernel
+  community.general.modprobe:
+    name: "{{ item }}"
+    state: present
+  loop: "{{ kernel_modules_required | difference(kernel_modules_missing) }}"
+  loop_control:
+    label: "{{ item }}"
+
+- name: Apply the sysctl values k3s networking depends on
+  ansible.posix.sysctl:
+    name: "{{ item.key }}"
+    value: "{{ item.value }}"
+    sysctl_file: "{{ kernel_modules_sysctl_file }}"
+    state: present
+    reload: true
+  loop: "{{ kernel_modules_sysctl | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}={{ item.value }}"
+  when: "'br_netfilter' not in kernel_modules_missing"
+
+- name: Report that a reboot is required before every module can be loaded
+  ansible.builtin.debug:
+    msg: >-
+      Modules {{ kernel_modules_missing | join(', ') }} are not available for the running
+      kernel ({{ ansible_facts['kernel'] }}); reboot the node, then re-run this playbook.
+  when: kernel_modules_reboot_required | bool
+
+- name: Show the kernel module state this role converged to
+  ansible.builtin.debug:
+    msg:
+      running_kernel: "{{ ansible_facts['kernel'] }}"
+      persisted_to: "{{ kernel_modules_load_dir }}/{{ kernel_modules_conf_file }}"
+      loaded_now: "{{ kernel_modules_required | difference(kernel_modules_missing) }}"
+      not_available: "{{ kernel_modules_missing }}"
+      reboot_required: "{{ kernel_modules_reboot_required | bool }}"
+      sysctl_applied: "{{ 'br_netfilter' not in kernel_modules_missing }}"

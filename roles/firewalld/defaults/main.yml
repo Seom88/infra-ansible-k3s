@@ -1,0 +1,22 @@
+---
+firewalld_k3s_ports:
+  - "6443/tcp"
+  - "10250/tcp"
+  - "8472/udp"
+  - "4240/tcp"
+  - "80/tcp"
+  - "443/tcp"
+
+firewalld_trusted_sources: >-
+  {{ [k3s_pod_cidr, k3s_service_cidr, tailscale_cidr] }}
+
+firewalld_extra_services: []
+
+firewalld_extra_ports: []
+
+firewalld_tailscale_ports:
+  - "41641/udp"
+
+firewalld_enabled: true
+firewalld_service: firewalld
+firewalld_zone: public

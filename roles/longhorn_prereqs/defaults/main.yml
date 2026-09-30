@@ -1,0 +1,26 @@
+longhorn_prereqs_enabled: true
+
+longhorn_prereqs_iscsid_service: iscsid
+
+longhorn_prereqs_modules_load_dir: /etc/modules-load.d
+longhorn_prereqs_modules_conf_file: longhorn.conf
+longhorn_prereqs_supported_host_filesystems:
+  - ext4
+  - xfs
+
+longhorn_prereqs_enforce_host_filesystem: true
+
+longhorn_prereqs_data_path: /var/lib/longhorn
+
+longhorn_prereqs_data_engine: v1
+
+longhorn_packages:  # noqa: var-naming[no-role-prefix]
+  - iscsi-initiator-utils
+  - nfs-utils
+  - cryptsetup
+  - device-mapper
+  - xfsprogs
+
+longhorn_kernel_modules:  # noqa: var-naming[no-role-prefix]
+  - iscsi_tcp
+  - dm_crypt

@@ -1,0 +1,25 @@
+cockpit_role_enabled: true
+
+cockpit_packages:
+  - cockpit-machines
+
+cockpit_disallowed_users_file: /etc/cockpit/disallowed-users
+
+cockpit_libvirt_socket_units:
+  - libvirtd.socket
+  - libvirtd-ro.socket
+  - virtlogd.socket
+  - virtqemud.socket
+  - virtproxyd.socket
+
+cockpit_systemd_unit_dir: /usr/lib/systemd/system
+
+cockpit_url_host: "{{ ansible_facts['hostname'] }}"
+
+cockpit_firewall_zone: "{{ firewalld_zone | default('public') }}"
+
+cockpit_install_libvirt: true
+libvirt_packages:  # noqa: var-naming[no-role-prefix]
+  - libvirt
+  - qemu-kvm
+  - virt-install

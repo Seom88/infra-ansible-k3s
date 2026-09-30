@@ -1,0 +1,27 @@
+---
+galaxy_info:
+  role_name: cockpit
+  namespace: infra_k3s
+  author: infra-k3s
+  description: >-
+    Completes the Cockpit web admin console on an AlmaLinux k3s node that
+    already has it: asserts the cockpit package is installed (the AlmaLinux
+    "Server" installer option provides it), installs the cockpit-machines
+    plugin, optionally activates libvirt so the Machines page can create a VM,
+    and owns the firewalld rule that opens port 9090.
+  license: MIT
+  min_ansible_version: "2.19"
+  platforms:
+    - name: EL
+      versions:
+        - "9"
+        - "10"
+  galaxy_tags:
+    - alma
+    - almalinux
+    - rhel
+    - cockpit
+    - webui
+    - k3s
+
+dependencies: []

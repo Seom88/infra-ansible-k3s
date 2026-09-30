@@ -1,0 +1,72 @@
+- name: Prepare the Cockpit console on a node that already has it
+  when: cockpit_role_enabled | bool
+  block:
+    - name: Read the installed package facts
+      ansible.builtin.package_facts:
+        manager: rpm
+
+    - name: Refuse to run on a node without Cockpit installed
+      ansible.builtin.assert:
+        that:
+          - "'cockpit' in (ansible_facts['packages'] | default({}))"
+        fail_msg: >-
+          The `cockpit` package is not installed on this host and this role does not install it;
+          run 'dnf install cockpit' or set cockpit_role_enabled: false in group_vars.
+
+    - name: Read the state of cockpit.socket
+      ansible.builtin.service_facts:
+
+    - name: Refuse to open the port for a socket that will not come back
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.services['cockpit.socket'] is defined
+          - ansible_facts.services['cockpit.socket'].state == 'running'
+        fail_msg: >-
+          cockpit.socket is not active, so port 9090 would have no listener behind it;
+          run 'systemctl enable --now cockpit.socket' and re-run this playbook.
+
+    - name: Install the cockpit-machines plugin
+      ansible.builtin.dnf:
+        name: "{{ cockpit_packages }}"
+        state: present
+
+    - name: Install libvirt and qemu so the Machines page can create a VM
+      ansible.builtin.dnf:
+        name: "{{ libvirt_packages }}"
+        state: present
+      when: cockpit_install_libvirt | bool
+
+    - name: Look for the libvirt socket units on this host
+      ansible.builtin.stat:
+        path: "{{ cockpit_systemd_unit_dir }}/{{ item }}"
+      loop: "{{ cockpit_libvirt_socket_units }}"
+      loop_control:
+        label: "{{ item }}"
+      register: cockpit_libvirt_unit_probe
+      when: cockpit_install_libvirt | bool
+
+    - name: Record which libvirt socket units are actually available
+      ansible.builtin.set_fact:
+        cockpit_libvirt_units_available: >-
+          {{ cockpit_libvirt_unit_probe.results | default([])
+             | selectattr('stat.exists') | map(attribute='item') | list }}
+      when: cockpit_install_libvirt | bool
+
+    - name: Enable and start the libvirt socket units
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        enabled: true
+        state: started
+      loop: "{{ cockpit_libvirt_units_available | default([]) }}"
+      loop_control:
+        label: "{{ item }}"
+      when: cockpit_install_libvirt | bool
+
+- name: Open the Cockpit port in firewalld
+  ansible.posix.firewalld:
+    service: cockpit
+    zone: "{{ cockpit_firewall_zone }}"
+    permanent: true
+    immediate: true
+    state: enabled
+  when: cockpit_role_enabled | bool and firewalld_enabled | bool

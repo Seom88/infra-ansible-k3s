@@ -1,0 +1,15 @@
+kernel_modules_k3s:
+  - br_netfilter
+  - overlay
+
+kernel_modules_additional: []
+
+kernel_modules_load_dir: /etc/modules-load.d
+kernel_modules_conf_file: k3s.conf
+
+kernel_modules_sysctl_file: /etc/sysctl.d/99-k3s.conf
+
+kernel_modules_sysctl:
+  net.bridge.bridge-nf-call-iptables: "1"
+  net.bridge.bridge-nf-call-ip6tables: "1"
+  net.ipv4.ip_forward: "1"

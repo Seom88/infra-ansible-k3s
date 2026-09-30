@@ -1,0 +1,13 @@
+# Dev overlay — full observability on top of prod lean base (values.yaml)
+# Merged via helm_release.cilium.values = [base, overlay] when cilium_values_file is set.
+# Dev keeps Hubble + Relay + UI + metrics for debugging NetworkPolicies and flows.
+
+operator:
+  replicas: 1
+
+hubble:
+  enabled: true
+  relay:
+    enabled: true
+  ui:
+    enabled: true

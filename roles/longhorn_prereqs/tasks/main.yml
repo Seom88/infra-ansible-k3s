@@ -1,0 +1,104 @@
+- name: Install the Longhorn host prerequisites
+  when: longhorn_prereqs_enabled | bool
+  block:
+    - name: Refuse to run for a Data Engine this role cannot support
+      ansible.builtin.assert:
+        that:
+          - longhorn_prereqs_data_engine | lower == 'v1'
+        fail_msg: >-
+          longhorn_prereqs_data_engine must be 'v1' ({{ longhorn_prereqs_data_engine }} given);
+          this role prepares the host for the V1 Data Engine only.
+
+    - name: Persist the Longhorn kernel modules so they load again on boot
+      ansible.builtin.template:
+        src: longhorn.conf.j2
+        dest: "{{ longhorn_prereqs_modules_load_dir }}/{{ longhorn_prereqs_modules_conf_file }}"
+        owner: root
+        group: root
+        mode: "0644"
+      vars:
+        longhorn_modules_to_load: "{{ longhorn_kernel_modules }}"
+
+    - name: Load the Longhorn kernel modules before the packages are installed
+      community.general.modprobe:
+        name: "{{ item }}"
+        state: present
+      loop: "{{ longhorn_kernel_modules }}"
+      loop_control:
+        label: "{{ item }}"
+      failed_when: false
+
+    - name: Install the Longhorn host packages
+      ansible.builtin.dnf:
+        name: "{{ longhorn_packages }}"
+        state: present
+
+    - name: Find the filesystem that backs the Longhorn data path
+      ansible.builtin.command:
+        cmd: "findmnt --noheadings --output FSTYPE --target {{ longhorn_prereqs_data_path }}"
+      register: longhorn_prereqs_host_filesystem_probe
+      changed_when: false
+      failed_when: false
+
+    - name: Record the filesystem type of the Longhorn data path
+      ansible.builtin.set_fact:
+        longhorn_prereqs_data_filesystem: >-
+          {{ (longhorn_prereqs_host_filesystem_probe.stdout | default(''))
+             | split() | first | default('unknown', true) }}
+
+    - name: Refuse to continue on a filesystem Longhorn cannot store data on
+      ansible.builtin.assert:
+        that:
+          - longhorn_prereqs_data_filesystem in longhorn_prereqs_supported_host_filesystems
+        fail_msg: >-
+          {{ longhorn_prereqs_data_path }} is on '{{ longhorn_prereqs_data_filesystem }}', which Longhorn cannot use;
+          reformat as ext4/xfs or point longhorn_prereqs_data_path elsewhere.
+      when: longhorn_prereqs_enforce_host_filesystem | bool
+
+    - name: Enable and start the iSCSI initiator daemon
+      ansible.builtin.systemd:
+        name: "{{ longhorn_prereqs_iscsid_service }}"
+        enabled: true
+        state: started
+
+    - name: Read the list of kernel modules currently loaded
+      ansible.builtin.command:
+        cmd: lsmod
+      register: longhorn_prereqs_loaded_modules
+      changed_when: false
+      failed_when: false
+
+    - name: Record which Longhorn modules are loaded right now
+      ansible.builtin.set_fact:
+        longhorn_prereqs_modules_loaded: >-
+          {{ longhorn_kernel_modules
+             | select('in', longhorn_prereqs_loaded_modules.stdout_lines | default([]))
+             | list }}
+
+    - name: Fail if a Longhorn kernel module is not loaded on this node
+      ansible.builtin.assert:
+        that:
+          - longhorn_prereqs_modules_loaded | length == longhorn_kernel_modules | length
+        fail_msg: >-
+          Longhorn kernel module(s) {{ longhorn_kernel_modules | difference(longhorn_prereqs_modules_loaded) | join(', ') }} are not loaded;
+          check 'modinfo -k {{ ansible_facts['kernel'] }}' and reboot if needed.
+
+    - name: Read the installed version of each Longhorn package
+      ansible.builtin.package_facts:
+        manager: rpm
+
+    - name: Seed the installed package version report
+      ansible.builtin.set_fact:
+        longhorn_prereqs_packages_installed: ""
+
+    - name: Record the installed version of each Longhorn package
+      ansible.builtin.set_fact:
+        longhorn_prereqs_packages_installed: >-
+          {{ longhorn_prereqs_packages_installed ~ ' ' ~ item ~ '='
+             ~ ((((ansible_facts['packages'][item] | first).version)
+                 ~ '-' ~ ((ansible_facts['packages'][item] | first).release))
+                if item in (ansible_facts['packages'] | default({}))
+                else 'NOT INSTALLED') }}
+      loop: "{{ longhorn_packages }}"
+      loop_control:
+        label: "{{ item }}"

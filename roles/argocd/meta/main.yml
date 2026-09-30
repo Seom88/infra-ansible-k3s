@@ -1,0 +1,26 @@
+---
+galaxy_info:
+  role_name: argocd
+  namespace: infra_k3s
+  author: infra-k3s
+  description: >-
+    Installs Argo CD from the pinned upstream Helm chart, internal-only, on the
+    k3s server. Exposes nothing: no Ingress, no NodePort, no Gateway API. The
+    external gitops project owns how Argo CD is reached.
+  license: MIT
+  min_ansible_version: "2.19"
+  platforms:
+    - name: EL
+      versions:
+        - "9"
+        - "10"
+  galaxy_tags:
+    - alma
+    - almalinux
+    - rhel
+    - kubernetes
+    - gitops
+    - argocd
+    - helm
+
+dependencies: []

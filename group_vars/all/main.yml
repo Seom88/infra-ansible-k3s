@@ -1,0 +1,24 @@
+---
+# k3s
+k3s_version: v1.37.0+k3s1
+
+# Networks
+k3s_pod_cidr: 10.42.0.0/16
+k3s_service_cidr: 10.43.0.0/16
+tailscale_cidr: 100.64.0.0/10
+
+# firewalld role manages the firewall; keep upstream k3s-ansible from touching it
+manage_firewall: false
+
+server_config_yaml: |
+  cluster-cidr: {{ k3s_pod_cidr }}
+  service-cidr: {{ k3s_service_cidr }}
+  flannel-backend: "none"
+  disable-network-policy: true
+  disable-kube-proxy: true
+  disable:
+    - traefik
+  supervisor-metrics: true
+  secrets-encryption: true
+  cluster-init: true
+  write-kubeconfig-mode: "0600"

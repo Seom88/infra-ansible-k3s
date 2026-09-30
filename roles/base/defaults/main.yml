@@ -1,0 +1,15 @@
+base_supported_major_versions:
+  - "9"
+  - "10"
+
+base_packages:
+  - curl
+  - tar
+  - socat
+
+base_kernel_modules_extra_package: kernel-modules-extra
+base_time_sync_service: chronyd
+base_cgroup_v2_marker: /sys/fs/cgroup/cgroup.controllers
+
+base_role_enabled: true
+kernel_modules_extra_required_major: 10  # noqa: var-naming[no-role-prefix]

@@ -1,0 +1,59 @@
+- name: Check whether the Helm CLI this role drives is on the node
+  ansible.builtin.command:
+    cmd: "{{ cilium_helm_binary }} version --short"
+  register: cilium_helm_probe
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Fail with the fix instead of installing the Helm CLI silently
+  ansible.builtin.assert:
+    that:
+      - cilium_helm_probe.rc == 0
+    fail_msg: "Helm CLI '{{ cilium_helm_binary }}' is missing on this node; install Helm or point cilium_helm_binary at an existing binary."
+
+- name: Check that k3s has written the kubeconfig this role authenticates with
+  ansible.builtin.stat:
+    path: "{{ cilium_kubeconfig }}"
+  register: cilium_kubeconfig_stat
+
+- name: Fail before touching the cluster when k3s is not installed yet
+  ansible.builtin.assert:
+    that:
+      - cilium_kubeconfig_stat.stat.exists
+    fail_msg: "{{ cilium_kubeconfig }} does not exist; run the k3s server play of site.yml first."
+
+- name: Ensure the Cilium namespace exists
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cilium_kubeconfig }}"
+    context: "{{ cilium_kube_context }}"
+    state: present
+    api_version: v1
+    kind: Namespace
+    name: "{{ cilium_namespace }}"
+
+- name: Make sure the Cilium chart repository is registered
+  kubernetes.core.helm_repository:
+    binary_path: "{{ cilium_helm_binary }}"
+    repo_name: "{{ cilium_chart_repo_name }}"
+    repo_url: "{{ cilium_chart_repo_url }}"
+    repo_state: present
+
+- name: Load Helm values
+  ansible.builtin.set_fact:
+    cilium_values: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/values/cilium/values.yaml') | from_yaml }}"
+
+- name: Install or upgrade the Cilium release
+  kubernetes.core.helm:
+    binary_path: "{{ cilium_helm_binary }}"
+    kubeconfig: "{{ cilium_kubeconfig }}"
+    context: "{{ cilium_kube_context }}"
+    release_name: "{{ cilium_release_name }}"
+    release_namespace: "{{ cilium_namespace }}"
+    release_state: present
+    release_values: "{{ cilium_values }}"
+    chart_ref: "{{ cilium_chart_repo_name }}/{{ cilium_chart_name }}"
+    chart_version: "{{ cilium_chart_version }}"
+    wait: "{{ cilium_wait }}"
+    wait_timeout: "{{ cilium_wait_timeout }}"
+    history_max: "{{ cilium_history_max }}"

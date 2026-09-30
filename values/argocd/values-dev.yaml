@@ -1,0 +1,28 @@
+# Dev single-node: reduce HA prod (2+2+2) to 1+1+1 to fit 8Gi (4c/8Gi) — single CP allow_scheduling
+controller:
+  replicas: 1
+  resources:
+    requests: { cpu: "500m", memory: "512Mi" }
+    limits: { cpu: "1000m", memory: "1Gi" }
+
+server:
+  autoscaling:
+    enabled: false
+  replicas: 1
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { cpu: 200m, memory: 256Mi }
+
+repoServer:
+  autoscaling:
+    enabled: false
+  replicas: 1
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: 500m, memory: 512Mi }
+
+applicationSet:
+  replicas: 1
+  resources:
+    requests: { cpu: 20m, memory: 64Mi }
+    limits: { cpu: 100m, memory: 128Mi }

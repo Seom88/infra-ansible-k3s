@@ -1,0 +1,22 @@
+galaxy_info:
+  role_name: base
+  namespace: infra_k3s
+  author: infra-k3s
+  description: >-
+    Base OS layer for an AlmaLinux k3s node: guard rail, base packages,
+    conditional kernel-modules-extra install and time synchronisation.
+  license: MIT
+  min_ansible_version: "2.19"
+  platforms:
+    - name: EL
+      versions:
+        - "9"
+        - "10"
+  galaxy_tags:
+    - alma
+    - almalinux
+    - rhel
+    - k3s
+    - base
+
+dependencies: []

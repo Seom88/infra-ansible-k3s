@@ -1,0 +1,24 @@
+galaxy_info:
+  role_name: kernel_modules
+  namespace: infra_k3s
+  author: infra-k3s
+  description: >-
+    Loads, persists and reports the kernel modules a k3s node needs
+    (br_netfilter, overlay), including the AlmaLinux 10 kernel-modules-extra
+    case where a reboot is required before a module can be loaded.
+  license: MIT
+  min_ansible_version: "2.19"
+  platforms:
+    - name: EL
+      versions:
+        - "9"
+        - "10"
+  galaxy_tags:
+    - alma
+    - almalinux
+    - rhel
+    - kernel
+    - modules
+    - k3s
+
+dependencies: []

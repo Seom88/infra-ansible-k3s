@@ -1,0 +1,26 @@
+---
+galaxy_info:
+  role_name: longhorn_prereqs
+  namespace: infra_k3s
+  author: infra-k3s
+  description: >-
+    Host prerequisites for Longhorn on an AlmaLinux k3s node: the iSCSI
+    initiator, the NFSv4 client, cryptsetup, the Longhorn kernel modules
+    loaded before the daemon that needs them, and a host filesystem check.
+    Does not install the Longhorn chart.
+  license: MIT
+  min_ansible_version: "2.19"
+  platforms:
+    - name: EL
+      versions:
+        - "9"
+        - "10"
+  galaxy_tags:
+    - alma
+    - almalinux
+    - rhel
+    - k3s
+    - longhorn
+    - storage
+
+dependencies: []

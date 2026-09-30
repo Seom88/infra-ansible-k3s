@@ -1,0 +1,12 @@
+argocd_chart_repo_name: argo
+argocd_chart_repo_url: https://argoproj.github.io/argo-helm
+argocd_chart_name: argo-cd
+argocd_chart_version: "10.9.2"
+argocd_release_name: argocd
+argocd_namespace: argocd
+argocd_helm_binary: helm
+argocd_kubeconfig: /etc/rancher/k3s/k3s.yaml
+argocd_kube_context: default
+argocd_wait: true
+argocd_wait_timeout: 900s
+argocd_history_max: 10

@@ -1,0 +1,26 @@
+# Ansible
+*.retry
+.ansible/
+collections/
+.env
+
+# Vault / secrets
+vault.yml
+vault_password_file
+*.vault
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+
+# Editors
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# opencode
+/.atl
+# Local-only orchestrator working memory (ODD task docs + Engram mirror)
+odd/
+.codegraph/

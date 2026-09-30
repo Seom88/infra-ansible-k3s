@@ -1,0 +1,62 @@
+---
+
+
+- name: Check whether the Helm CLI this role drives is on the node
+  ansible.builtin.command:
+    cmd: "{{ argocd_helm_binary }} version --short"
+  register: argocd_helm_probe
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Fail with the fix instead of installing the Helm CLI silently
+  ansible.builtin.assert:
+    that:
+      - argocd_helm_probe.rc == 0
+    fail_msg: "Helm CLI '{{ argocd_helm_binary }}' is missing on this node; install Helm or point argocd_helm_binary at an existing binary."
+
+- name: Check that k3s has written the kubeconfig this role authenticates with
+  ansible.builtin.stat:
+    path: "{{ argocd_kubeconfig }}"
+  register: argocd_kubeconfig_stat
+
+- name: Fail before touching the cluster when k3s is not installed yet
+  ansible.builtin.assert:
+    that:
+      - argocd_kubeconfig_stat.stat.exists
+    fail_msg: "{{ argocd_kubeconfig }} does not exist; run the k3s server play of site.yml first."
+
+- name: Ensure the Argo CD namespace exists
+  kubernetes.core.k8s:
+    kubeconfig: "{{ argocd_kubeconfig }}"
+    context: "{{ argocd_kube_context }}"
+    state: present
+    api_version: v1
+    kind: Namespace
+    name: "{{ argocd_namespace }}"
+
+- name: Make sure the Argo CD chart repository is registered
+  kubernetes.core.helm_repository:
+    binary_path: "{{ argocd_helm_binary }}"
+    repo_name: "{{ argocd_chart_repo_name }}"
+    repo_url: "{{ argocd_chart_repo_url }}"
+    repo_state: present
+
+- name: Load Helm values
+  ansible.builtin.set_fact:
+    argocd_values: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/values/argocd/values.yaml') | from_yaml }}"
+
+- name: Install or upgrade the Argo CD release
+  kubernetes.core.helm:
+    binary_path: "{{ argocd_helm_binary }}"
+    kubeconfig: "{{ argocd_kubeconfig }}"
+    context: "{{ argocd_kube_context }}"
+    release_name: "{{ argocd_release_name }}"
+    release_namespace: "{{ argocd_namespace }}"
+    release_state: present
+    release_values: "{{ argocd_values }}"
+    chart_ref: "{{ argocd_chart_repo_name }}/{{ argocd_chart_name }}"
+    chart_version: "{{ argocd_chart_version }}"
+    wait: "{{ argocd_wait }}"
+    wait_timeout: "{{ argocd_wait_timeout }}"
+    history_max: "{{ argocd_history_max }}"

@@ -1,0 +1,153 @@
+# k3s - Without kube-proxy + Gateway API
+# Sidero: https://docs.siderolabs.com/kubernetes-guides/cni/deploying-cilium#cli-install Tab "Without kube-proxy + Gateway API"
+# Helm equivalent of:
+# helm install cilium cilium/cilium --version 1.18.0 --namespace kube-system \
+#   --set ipam.mode=kubernetes \
+#   --set kubeProxyReplacement=true \
+#   --set securityContext.capabilities.ciliumAgent="{CHOWN,KILL,NET_ADMIN,NET_RAW,IPC_LOCK,SYS_ADMIN,SYS_RESOURCE,DAC_OVERRIDE,FOWNER,SETGID,SETUID}" \
+#   --set securityContext.capabilities.cleanCiliumState="{NET_ADMIN,SYS_ADMIN,SYS_RESOURCE}" \
+#   --set cgroup.autoMount.enabled=false \
+#   --set cgroup.hostRoot=/sys/fs/cgroup \
+#   --set k8sServiceHost=127.0.0.1 \
+#   --set k8sServicePort=6443 \
+#   --set gatewayAPI.enabled=true \
+#   --set gatewayAPI.enableAlpn=true \
+#   --set gatewayAPI.enableAppProtocol=true
+
+ipam:
+  mode: kubernetes
+
+kubeProxyReplacement: true
+
+k8sServiceHost: 127.0.0.1
+k8sServicePort: 6443
+
+resources:
+  requests:
+    cpu: 150m
+    memory: 512Mi
+
+
+# Fix kubectl port-forward/exec/log: bypass socket LB in pod netns (Cilium socket LB intercepts 127.0.0.1 connect, RSTs) — per docs.cilium.io kubeproxy-free
+# Cilium 1.20.1 defaults socketLB.enabled=false -> hostNamespaceOnly alone is no-op (bpf-lb-sock:false). Must enable.
+socketLB:
+  enabled: true
+  hostNamespaceOnly: true
+
+securityContext:
+  capabilities:
+    ciliumAgent:
+      - CHOWN
+      - KILL
+      - NET_ADMIN
+      - NET_RAW
+      - IPC_LOCK
+      - SYS_ADMIN
+      - SYS_RESOURCE
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    cleanCiliumState:
+      - NET_ADMIN
+      - SYS_ADMIN
+      - SYS_RESOURCE
+
+cgroup:
+  autoMount:
+    enabled: false
+  hostRoot: /sys/fs/cgroup
+
+gatewayAPI:
+  enabled: true
+  enableAlpn: true
+  enableAppProtocol: true
+
+# operator.replicas is overridden via Terraform var.cilium_operator_replicas (helm set).
+# Default 1 for single-node/dev, use 2 for HA (3+ nodes). Leader election handles failover.
+operator:
+  replicas: 2
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+  prometheus:
+    enabled: true
+    port: 9963
+    serviceMonitor:
+      enabled: false
+      labels:
+        release: monitoring
+      interval: 30s
+  dashboards:
+    enabled: true
+    label: grafana_dashboard
+    labelValue: "1"
+    annotations: {}
+
+# Observability — Prometheus + Grafana per https://docs.cilium.io/en/stable/observability/grafana/ + /metrics/
+prometheus:
+  enabled: true
+  port: 9962
+  serviceMonitor:
+    enabled: false
+    labels:
+      release: monitoring
+    interval: 30s
+
+envoy:
+  enabled: true
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+  prometheus:
+    port: "9964"
+    serviceMonitor:
+      enabled: false
+      labels:
+        release: monitoring
+      interval: 30s
+
+# Prod lean: Envoy ON (Gateway API), Hubble OFF (enable on-demand for debug via values-dev.yaml overlay)
+hubble:
+  enabled: true
+  metrics:
+    enabled:
+      - dns
+      - drop
+      - tcp
+      - flow
+      - port-distribution
+      - icmp
+      - "httpV2:exemplars=true;labelsContext=source_ip,source_namespace,source_workload,destination_ip,destination_namespace,destination_workload,traffic_direction"
+    enableOpenMetrics: true
+    port: 9965
+    serviceMonitor:
+      enabled: false
+      labels:
+        release: monitoring
+      interval: 30s
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      labelValue: "1"
+      annotations: {}
+  relay:
+    enabled: true
+    prometheus:
+      enabled: true
+      port: 9966
+      serviceMonitor:
+        enabled: false
+        labels:
+          release: monitoring
+        interval: 30s
+  ui:
+    enabled: true
+
+dashboards:
+  enabled: true
+  label: grafana_dashboard
+  labelValue: "1"
+  annotations: {}
