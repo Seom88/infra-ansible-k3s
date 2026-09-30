@@ -11,5 +11,9 @@ base_kernel_modules_extra_package: kernel-modules-extra
 base_time_sync_service: chronyd
 base_cgroup_v2_marker: /sys/fs/cgroup/cgroup.controllers
 
+# helm-diff powers kubernetes.core.helm idempotency checks; pin it for reproducible runs.
+base_helm_diff_version: "3.15.15"
+base_helm_diff_git_tag: "v{{ base_helm_diff_version }}"
+
 base_role_enabled: true
 kernel_modules_extra_required_major: 10  # noqa: var-naming[no-role-prefix]
