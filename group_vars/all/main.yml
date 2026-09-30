@@ -22,3 +22,7 @@ server_config_yaml: |
   secrets-encryption: true
   cluster-init: true
   write-kubeconfig-mode: "0600"
+
+# Longhorn
+# Host data path for the dedicated Longhorn SSD, on all nodes.
+longhorn_prereqs_data_path: /mnt/data

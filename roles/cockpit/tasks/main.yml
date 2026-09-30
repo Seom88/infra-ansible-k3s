@@ -66,6 +66,31 @@
         label: "{{ item }}"
       when: cockpit_install_libvirt | bool
 
+    - name: Check that the libvirt sockets Cockpit needs are actually listening
+      ansible.builtin.stat:
+        path: "/run/libvirt/{{ item }}-sock"
+      loop: "{{ cockpit_libvirt_required_sockets }}"
+      loop_control:
+        label: "{{ item }}"
+      register: cockpit_libvirt_required_probe
+      when: cockpit_install_libvirt | bool
+
+    - name: Refuse to continue while a libvirt socket Cockpit needs is missing
+      ansible.builtin.assert:
+        that:
+          - >-
+            cockpit_libvirt_required_probe.results | default([])
+            | rejectattr('stat.exists') | list | length == 0
+        fail_msg: >-
+          Cockpit's Machines page needs these libvirt sockets, which are not
+          listening on this host:
+          {{ cockpit_libvirt_required_probe.results | default([])
+             | rejectattr('stat.exists') | map(attribute='item') | list
+             | join(', ') }}.
+          The matching libvirt driver package is missing (the `libvirt`
+          metapackage pulls them in): install it and re-run this playbook.
+      when: cockpit_install_libvirt | bool
+
 - name: Open the Cockpit port in firewalld
   ansible.posix.firewalld:
     service: cockpit

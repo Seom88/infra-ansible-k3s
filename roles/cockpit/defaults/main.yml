@@ -5,12 +5,33 @@ cockpit_packages:
 
 cockpit_disallowed_users_file: /etc/cockpit/disallowed-users
 
+# The libvirt client routes each API to the daemon that owns that driver, so
+# every socket below is a separate connection point for Cockpit. Units whose
+# package is not installed are skipped by the probe in tasks/main.yml.
 cockpit_libvirt_socket_units:
+  # Monolithic daemon (still shipped on EL9, absent on modular-only hosts)
   - libvirtd.socket
   - libvirtd-ro.socket
+  # Support services
   - virtlogd.socket
-  - virtqemud.socket
+  - virtlockd.socket
   - virtproxyd.socket
+  # Modular driver daemons
+  - virtqemud.socket
+  - virtstoraged.socket
+  - virtnetworkd.socket
+  - virtnodedevd.socket
+  - virtnwfilterd.socket
+  - virtinterfaced.socket
+  - virtsecretd.socket
+
+# Minimum set Cockpit (cockpit-machines) needs to render its Machines page:
+# domains, storage pools, networks and node devices.
+cockpit_libvirt_required_sockets:
+  - virtqemud
+  - virtstoraged
+  - virtnetworkd
+  - virtnodedevd
 
 cockpit_systemd_unit_dir: /usr/lib/systemd/system
 
