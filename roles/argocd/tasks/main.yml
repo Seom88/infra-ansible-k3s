@@ -60,5 +60,5 @@
     chart_ref: "{{ argocd_chart_repo_name }}/{{ argocd_chart_name }}"
     chart_version: "{{ argocd_chart_version }}"
     wait: "{{ argocd_wait }}"
-    wait_timeout: "{{ argocd_wait_timeout }}"
+    timeout: "{{ argocd_wait_timeout }}"
     history_max: "{{ argocd_history_max }}"

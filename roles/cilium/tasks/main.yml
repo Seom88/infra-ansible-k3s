@@ -57,5 +57,5 @@
     chart_ref: "{{ cilium_chart_repo_name }}/{{ cilium_chart_name }}"
     chart_version: "{{ cilium_chart_version }}"
     wait: "{{ cilium_wait }}"
-    wait_timeout: "{{ cilium_wait_timeout }}"
+    timeout: "{{ cilium_wait_timeout }}"
     history_max: "{{ cilium_history_max }}"
