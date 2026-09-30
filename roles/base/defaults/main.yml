@@ -6,6 +6,7 @@ base_packages:
   - curl
   - tar
   - socat
+  - git  # helm plugin install clones the plugin repo
 
 base_kernel_modules_extra_package: kernel-modules-extra
 base_time_sync_service: chronyd
