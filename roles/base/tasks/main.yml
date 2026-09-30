@@ -17,6 +17,24 @@
         name: "{{ base_packages }}"
         state: present
 
+    - name: Check whether the Helm CLI is already installed
+      ansible.builtin.command: helm version --short
+      register: base_helm_probe
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Download the official Helm installer script
+      ansible.builtin.get_url:
+        url: https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+        dest: /tmp/get-helm-3
+        mode: "0755"
+      when: base_helm_probe.rc != 0
+
+    - name: Install the Helm CLI
+      ansible.builtin.command: bash /tmp/get-helm-3
+      when: base_helm_probe.rc != 0
+
     - name: Install kernel-modules-extra pinned to the running kernel
       ansible.builtin.dnf:
         name: "{{ base_kernel_modules_extra_package }}-{{ ansible_facts['kernel'] }}"

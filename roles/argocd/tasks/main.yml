@@ -27,13 +27,15 @@
     fail_msg: "{{ argocd_kubeconfig }} does not exist; run the k3s server play of site.yml first."
 
 - name: Ensure the Argo CD namespace exists
-  kubernetes.core.k8s:
-    kubeconfig: "{{ argocd_kubeconfig }}"
-    context: "{{ argocd_kube_context }}"
-    state: present
-    api_version: v1
-    kind: Namespace
-    name: "{{ argocd_namespace }}"
+  ansible.builtin.command:
+    cmd: kubectl create namespace {{ argocd_namespace }}
+  environment:
+    KUBECONFIG: "{{ argocd_kubeconfig }}"
+  register: argocd_namespace_create
+  changed_when: argocd_namespace_create.rc == 0
+  failed_when: >-
+    argocd_namespace_create.rc != 0
+    and 'AlreadyExists' not in argocd_namespace_create.stderr
 
 - name: Make sure the Argo CD chart repository is registered
   kubernetes.core.helm_repository:

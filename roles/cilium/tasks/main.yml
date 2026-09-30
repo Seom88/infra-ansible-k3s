@@ -24,13 +24,15 @@
     fail_msg: "{{ cilium_kubeconfig }} does not exist; run the k3s server play of site.yml first."
 
 - name: Ensure the Cilium namespace exists
-  kubernetes.core.k8s:
-    kubeconfig: "{{ cilium_kubeconfig }}"
-    context: "{{ cilium_kube_context }}"
-    state: present
-    api_version: v1
-    kind: Namespace
-    name: "{{ cilium_namespace }}"
+  ansible.builtin.command:
+    cmd: kubectl create namespace {{ cilium_namespace }}
+  environment:
+    KUBECONFIG: "{{ cilium_kubeconfig }}"
+  register: cilium_namespace_create
+  changed_when: cilium_namespace_create.rc == 0
+  failed_when: >-
+    cilium_namespace_create.rc != 0
+    and 'AlreadyExists' not in cilium_namespace_create.stderr
 
 - name: Make sure the Cilium chart repository is registered
   kubernetes.core.helm_repository:
