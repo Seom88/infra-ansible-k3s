@@ -44,3 +44,10 @@ libvirt_packages:  # noqa: var-naming[no-role-prefix]
   - libvirt
   - qemu-kvm
   - virt-install
+
+# Libvirt storage pool backing Cockpit Machines (consumed by tasks/main.yml).
+cockpit_libvirt_pool_enabled: true
+cockpit_libvirt_pool_name: "default"
+cockpit_libvirt_pool_path: "/home/libvirt/images"
+cockpit_libvirt_pool_autostart: true
+cockpit_libvirt_pool_selinux_fix_enabled: true

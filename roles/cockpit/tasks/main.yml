@@ -99,3 +99,108 @@
     immediate: true
     state: enabled
   when: cockpit_role_enabled | bool and firewalld_enabled | bool
+
+- name: Manage the libvirt storage pool for Cockpit Machines
+  when: cockpit_role_enabled | bool and cockpit_libvirt_pool_enabled | bool
+  block:
+    - name: Ensure the libvirt pool directory exists
+      ansible.builtin.file:
+        path: "{{ cockpit_libvirt_pool_path }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0711"
+
+    - name: Install the SELinux policy tools for the fcontext fix
+      ansible.builtin.dnf:
+        name: policycoreutils-python-utils
+        state: present
+      when:
+        - cockpit_libvirt_pool_selinux_fix_enabled | bool
+        - ansible_facts['selinux'] is defined and ansible_facts['selinux']['status'] == "enabled"
+
+    - name: Check existing SELinux fcontext rules
+      ansible.builtin.command: semanage fcontext -l  # noqa: command-instead-of-module
+      register: cockpit_pool_fcontext_list
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      when:
+        - cockpit_libvirt_pool_selinux_fix_enabled | bool
+        - ansible_facts['selinux'] is defined and ansible_facts['selinux']['status'] == "enabled"
+
+    - name: Add SELinux fcontext rule for the libvirt pool path
+      ansible.builtin.command: semanage fcontext -a -t virt_image_t "{{ cockpit_libvirt_pool_path }}(/.*)?"  # noqa: command-instead-of-module
+      register: cockpit_pool_fcontext_add
+      changed_when: cockpit_pool_fcontext_add.rc == 0
+      failed_when: false
+      when:
+        - cockpit_libvirt_pool_selinux_fix_enabled | bool
+        - ansible_facts['selinux'] is defined and ansible_facts['selinux']['status'] == "enabled"
+        - >-
+          cockpit_pool_fcontext_list is skipped
+          or cockpit_pool_fcontext_list.rc | default(1) != 0
+          or cockpit_pool_fcontext_list.stdout is not search(
+            (cockpit_libvirt_pool_path | regex_escape) ~ '\(\/\.\*\)\?.*virt_image_t')
+
+    - name: Update SELinux fcontext rule for the libvirt pool path on duplicate
+      ansible.builtin.command: semanage fcontext -m -t virt_image_t "{{ cockpit_libvirt_pool_path }}(/.*)?"  # noqa: command-instead-of-module
+      register: cockpit_pool_fcontext_modify
+      changed_when: cockpit_pool_fcontext_modify.rc == 0
+      when:
+        - cockpit_libvirt_pool_selinux_fix_enabled | bool
+        - ansible_facts['selinux'] is defined and ansible_facts['selinux']['status'] == "enabled"
+        - cockpit_pool_fcontext_add.rc is defined and cockpit_pool_fcontext_add.rc != 0
+
+    - name: Restore SELinux contexts under the libvirt pool path
+      ansible.builtin.command: restorecon -Rv "{{ cockpit_libvirt_pool_path }}"  # noqa: command-instead-of-module
+      register: cockpit_pool_restorecon
+      changed_when: "'Relabeled' in cockpit_pool_restorecon.stdout"
+      when:
+        - cockpit_libvirt_pool_selinux_fix_enabled | bool
+        - ansible_facts['selinux'] is defined and ansible_facts['selinux']['status'] == "enabled"
+
+    - name: Check whether the libvirt pool is already defined
+      ansible.builtin.command: virsh pool-info "{{ cockpit_libvirt_pool_name }}"  # noqa: command-instead-of-module
+      register: cockpit_pool_info
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Define the libvirt pool
+      ansible.builtin.command: >-  # noqa: command-instead-of-module
+        virsh pool-define-as "{{ cockpit_libvirt_pool_name }}"
+        dir --target "{{ cockpit_libvirt_pool_path }}"
+      register: cockpit_pool_define
+      changed_when: cockpit_pool_define.rc == 0
+      when: cockpit_pool_info.rc != 0
+
+    - name: Build the libvirt pool
+      ansible.builtin.command: virsh pool-build "{{ cockpit_libvirt_pool_name }}"  # noqa: command-instead-of-module
+      register: cockpit_pool_build
+      changed_when: cockpit_pool_build.rc == 0
+      failed_when: false
+      when: cockpit_pool_info.rc != 0
+
+    - name: Start the libvirt pool
+      ansible.builtin.command: virsh pool-start "{{ cockpit_libvirt_pool_name }}"  # noqa: command-instead-of-module
+      register: cockpit_pool_start
+      changed_when: cockpit_pool_start.rc == 0
+      when: cockpit_pool_info.rc != 0 or cockpit_pool_info.stdout is search('State:\s+inactive')
+
+    - name: Enable autostart for the libvirt pool
+      ansible.builtin.command: virsh pool-autostart "{{ cockpit_libvirt_pool_name }}"  # noqa: command-instead-of-module
+      register: cockpit_pool_autostart_on
+      changed_when: cockpit_pool_autostart_on.rc == 0
+      when:
+        - cockpit_libvirt_pool_autostart | bool
+        - cockpit_pool_info.rc != 0 or cockpit_pool_info.stdout is search('Autostart:\s+no')
+
+    - name: Disable autostart for the libvirt pool
+      ansible.builtin.command: virsh pool-autostart "{{ cockpit_libvirt_pool_name }}" --disable  # noqa: command-instead-of-module
+      register: cockpit_pool_autostart_off
+      changed_when: cockpit_pool_autostart_off.rc == 0
+      when:
+        - not cockpit_libvirt_pool_autostart | bool
+        - cockpit_pool_info.rc == 0
+        - cockpit_pool_info.stdout is search('Autostart:\s+yes')
