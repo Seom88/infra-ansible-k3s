@@ -45,6 +45,19 @@
   ansible.builtin.set_fact:
     cilium_values: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/values/cilium/values.yaml') | from_yaml }}"
 
+- name: Install Gateway API CRDs required by gatewayAPI.enabled
+  ansible.builtin.command:
+    cmd: >-
+      kubectl apply --server-side
+      -f https://github.com/kubernetes-sigs/gateway-api/releases/download/{{ cilium_gateway_api_version }}/{{ cilium_gateway_api_channel }}-install.yaml
+  environment:
+    KUBECONFIG: "{{ cilium_kubeconfig }}"
+  register: cilium_gateway_api_crds
+  changed_when: >-
+    'created' in cilium_gateway_api_crds.stdout
+    or 'configured' in cilium_gateway_api_crds.stdout
+  failed_when: cilium_gateway_api_crds.rc != 0
+
 - name: Install or upgrade the Cilium release
   kubernetes.core.helm:
     binary_path: "{{ cilium_helm_binary }}"
