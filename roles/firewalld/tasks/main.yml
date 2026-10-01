@@ -32,7 +32,7 @@
       loop_control:
         label: "{{ item }}"
 
-    - name: Trust the pod, service and Tailscale source networks
+    - name: Trust the pod and service networks
       ansible.posix.firewalld:
         source: "{{ item }}"
         zone: trusted
@@ -40,6 +40,17 @@
         immediate: true
         state: enabled
       loop: "{{ firewalld_trusted_sources }}"
+      loop_control:
+        label: "{{ item }}"
+
+    - name: Trust the Tailscale interface
+      ansible.posix.firewalld:
+        interface: "{{ item }}"
+        zone: trusted
+        permanent: true
+        immediate: true
+        state: enabled
+      loop: "{{ firewalld_trusted_interfaces }}"
       loop_control:
         label: "{{ item }}"
 

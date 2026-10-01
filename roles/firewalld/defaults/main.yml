@@ -8,7 +8,10 @@ firewalld_k3s_ports:
   - "443/tcp"
 
 firewalld_trusted_sources: >-
-  {{ [k3s_pod_cidr, k3s_service_cidr, tailscale_cidr] }}
+  {{ [k3s_pod_cidr, k3s_service_cidr] }}
+
+firewalld_trusted_interfaces:
+  - tailscale0
 
 firewalld_extra_services: []
 
