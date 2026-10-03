@@ -1,3 +1,20 @@
+# https://github.com/cilium/cilium/issues/47591 (vpn + cilium)
+- name: Accept local-source packets on Cilium lxc interfaces (Tailscale src_valid_mark vs Cilium L7 proxy)
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/90-accept_local.conf
+    content: |
+      net.ipv4.conf.all.accept_local = 0
+      -net.ipv4.conf.lxc*.accept_local = 1
+    owner: root
+    group: root
+    mode: "0644"
+  register: cilium_accept_local_sysctl
+
+- name: Apply the accept_local sysctl now
+  ansible.builtin.command: systemd-sysctl
+  changed_when: true
+  when: cilium_accept_local_sysctl is changed
+
 - name: Check whether the Helm CLI this role drives is on the node
   ansible.builtin.command:
     cmd: "{{ cilium_helm_binary }} version --short"
