@@ -10,10 +10,12 @@
     mode: "0644"
   register: cilium_accept_local_sysctl
 
+# A handler would defer this until the end of the play, but the sysctl must
+# be active before the Cilium Helm install runs later in this same play.
 - name: Apply the accept_local sysctl now
   ansible.builtin.command: systemd-sysctl
   changed_when: true
-  when: cilium_accept_local_sysctl is changed
+  when: cilium_accept_local_sysctl is changed  # noqa no-handler
 
 - name: Check whether the Helm CLI this role drives is on the node
   ansible.builtin.command:
