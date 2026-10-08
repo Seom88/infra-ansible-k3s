@@ -9,7 +9,18 @@ kernel_modules_conf_file: k3s.conf
 
 kernel_modules_sysctl_file: /etc/sysctl.d/99-k3s.conf
 
+# Obsolete drop-in that used to carry a hand-tuned inotify limit. The values
+# now live in kernel_modules_sysctl, so this file is only a source of drift.
+kernel_modules_obsolete_sysctl_files:
+  - /etc/sysctl.d/99-inotify.conf
+
+# inotify ceilings k3s depends on: every kubelet watch, containerd, ArgoCD,
+# Longhorn and CNPG instance opens its own instance, and the kernel default
+# (128) is exhausted by a single node of a normal cluster.
 kernel_modules_sysctl:
   net.bridge.bridge-nf-call-iptables: "1"
   net.bridge.bridge-nf-call-ip6tables: "1"
   net.ipv4.ip_forward: "1"
+  fs.inotify.max_user_instances: "8192"
+  fs.inotify.max_user_watches: "524288"
+  fs.inotify.max_queued_events: "16384"

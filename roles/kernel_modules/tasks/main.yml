@@ -56,7 +56,15 @@
   loop_control:
     label: "{{ item }}"
 
-- name: Apply the sysctl values k3s networking depends on
+- name: Remove the obsolete sysctl drop-ins this role used to own
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop: "{{ kernel_modules_obsolete_sysctl_files }}"
+  loop_control:
+    label: "{{ item }}"
+
+- name: Apply the sysctl values k3s depends on
   ansible.posix.sysctl:
     name: "{{ item.key }}"
     value: "{{ item.value }}"
@@ -66,7 +74,9 @@
   loop: "{{ kernel_modules_sysctl | dict2items }}"
   loop_control:
     label: "{{ item.key }}={{ item.value }}"
-  when: "'br_netfilter' not in kernel_modules_missing"
+  # net.bridge.* only exists once br_netfilter is loaded; everything else
+  # (inotify) is independent of it and must still be applied.
+  when: "'br_netfilter' not in kernel_modules_missing or not item.key.startswith('net.bridge.')"
 
 - name: Report that a reboot is required before every module can be loaded
   ansible.builtin.debug:
@@ -84,3 +94,4 @@
       not_available: "{{ kernel_modules_missing }}"
       reboot_required: "{{ kernel_modules_reboot_required | bool }}"
       sysctl_applied: "{{ 'br_netfilter' not in kernel_modules_missing }}"
+      sysctl_file: "{{ kernel_modules_sysctl_file }}"
