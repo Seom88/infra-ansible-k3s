@@ -1,0 +1,80 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "enabledManagers": ["ansible-galaxy", "custom.regex"],
+  "schedule": ["before 6am on Monday"],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Cilium Helm chart version in role defaults",
+      "managerFilePatterns": ["/(^|/)roles\\/cilium\\/defaults\\/main\\.yml$/"],
+      "matchStrings": ["cilium_chart_version:\\s*[\"'](?<currentValue>[^\"']+)[\"']"],
+      "datasourceTemplate": "helm",
+      "depNameTemplate": "cilium",
+      "registryUrlTemplate": "https://helm.cilium.io",
+      "versioningTemplate": "semver"
+    },
+    {
+      "customType": "regex",
+      "description": "Gateway API CRDs version (Cilium prerequisite, moves with the chart)",
+      "managerFilePatterns": ["/(^|/)roles\\/cilium\\/defaults\\/main\\.yml$/"],
+      "matchStrings": ["cilium_gateway_api_version:\\s*[\"'](?<currentValue>[^\"']+)[\"']"],
+      "datasourceTemplate": "github-releases",
+      "packageNameTemplate": "kubernetes-sigs/gateway-api",
+      "versioningTemplate": "semver"
+    },
+    {
+      "customType": "regex",
+      "description": "Argo CD Helm chart version in role defaults",
+      "managerFilePatterns": ["/(^|/)roles\\/argocd\\/defaults\\/main\\.yml$/"],
+      "matchStrings": ["argocd_chart_version:\\s*[\"'](?<currentValue>[^\"']+)[\"']"],
+      "datasourceTemplate": "helm",
+      "depNameTemplate": "argo-cd",
+      "registryUrlTemplate": "https://argoproj.github.io/argo-helm",
+      "versioningTemplate": "semver"
+    },
+    {
+      "customType": "regex",
+      "description": "k3s release in group vars (vX.Y.Z+k3sN format)",
+      "managerFilePatterns": ["/(^|/)group_vars\\/all\\/main\\.yml$/"],
+      "matchStrings": ["k3s_version:\\s*(?<currentValue>v\\d+\\.\\d+\\.\\d+\\+k3s\\d+)"],
+      "datasourceTemplate": "github-releases",
+      "packageNameTemplate": "k3s-io/k3s",
+      "versioningTemplate": "semver"
+    },
+    {
+      "customType": "regex",
+      "description": "k3s-ansible collection git tag in requirements.yml",
+      "managerFilePatterns": ["/(^|/)requirements\\.yml$/"],
+      "matchStrings": ["k3s\\.orchestration[\\s\\S]*?version:\\s*(?<currentValue>\\d+\\.\\d+\\.\\d+)"],
+      "datasourceTemplate": "github-tags",
+      "packageNameTemplate": "k3s-io/k3s-ansible",
+      "versioningTemplate": "semver"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "Cilium component: chart + Gateway CRDs move together",
+      "matchPackageNames": ["cilium", "kubernetes-sigs/gateway-api"],
+      "groupName": "cilium",
+      "minimumReleaseAge": "3 days"
+    },
+    {
+      "description": "Argo CD component",
+      "matchPackageNames": ["argo-cd"],
+      "groupName": "argocd",
+      "minimumReleaseAge": "3 days"
+    },
+    {
+      "description": "k3s component: release + ansible collection move together",
+      "matchPackageNames": ["k3s-io/k3s", "k3s-io/k3s-ansible"],
+      "groupName": "k3s",
+      "minimumReleaseAge": "7 days"
+    },
+    {
+      "description": "Ansible Galaxy collections",
+      "matchDatasources": ["galaxy-collection"],
+      "groupName": "ansible-collections"
+    }
+  ]
+}
