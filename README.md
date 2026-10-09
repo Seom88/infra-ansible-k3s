@@ -1,4 +1,4 @@
-# infra-k3s
+# infra-ansible-k3s
 
 ![Ansible](https://img.shields.io/badge/Ansible-%E2%89%A52.15-EE0000?logo=ansible&logoColor=white)
 ![k3s](https://img.shields.io/badge/k3s-v1.36.5%2Bk3s1-FFC619?logo=k3s&logoColor=black)
