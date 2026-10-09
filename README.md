@@ -146,8 +146,9 @@ The short version of the arguments behind the architecture (longer reasoning liv
 
 This repo is **living**: versions are pinned deliberately, decisions are recorded in the
 commit history and in `docs/`, and overlays (`values-dev.yaml`) show the single-node
-profile next to the HA profile. No CI runs today — the verification story is
-`--syntax-check` + `ansible-lint` + idempotent re-runs, documented in the runbook.
+profile next to the HA profile. CI runs `ansible-lint` + `ansible-playbook --syntax-check`
+on every push and pull request, and Renovate keeps collections, charts, and CI actions up
+to date — the rest of the verification story (idempotent re-runs) is documented in the runbook.
 
 ## License
 
