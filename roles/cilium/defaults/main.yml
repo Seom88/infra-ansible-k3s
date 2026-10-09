@@ -18,5 +18,5 @@ cilium_history_max: 10
 # Gateway API CRDs — prerequisite for gatewayAPI.enabled=true.
 # Per https://docs.cilium.io/en/stable/network/servicemesh/gateway-api/gateway-api/#installation
 # Cilium does NOT install gateway.networking.k8s.io CRDs; install them before helm.
-cilium_gateway_api_version: "v1.6.1"
+cilium_gateway_api_version: "v1.6.2"
 cilium_gateway_api_channel: standard
