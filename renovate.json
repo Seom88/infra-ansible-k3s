@@ -1,7 +1,7 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["config:recommended"],
-  "enabledManagers": ["ansible-galaxy", "custom.regex"],
+  "enabledManagers": ["ansible-galaxy", "custom.regex", "github-actions"],
   "schedule": ["before 6am on Monday"],
   "customManagers": [
     {
@@ -35,6 +35,15 @@
     },
     {
       "customType": "regex",
+      "description": "helm-diff plugin version in k3s_prereqs defaults",
+      "managerFilePatterns": ["/(^|/)roles\\/k3s_prereqs\\/defaults\\/main\\.yml$/"],
+      "matchStrings": ["k3s_prereqs_helm_diff_version:\\s*[\"'](?<currentValue>[^\"']+)[\"']"],
+      "datasourceTemplate": "github-releases",
+      "packageNameTemplate": "databus23/helm-diff",
+      "versioningTemplate": "semver"
+    },
+    {
+      "customType": "regex",
       "description": "k3s release in group vars (vX.Y.Z+k3sN format)",
       "managerFilePatterns": ["/(^|/)group_vars\\/all\\/main\\.yml$/"],
       "matchStrings": ["k3s_version:\\s*(?<currentValue>v\\d+\\.\\d+\\.\\d+\\+k3s\\d+)"],
@@ -63,6 +72,12 @@
       "description": "Argo CD component",
       "matchPackageNames": ["argo-cd"],
       "groupName": "argocd",
+      "minimumReleaseAge": "3 days"
+    },
+    {
+      "description": "helm-diff plugin (k3s prereq)",
+      "matchPackageNames": ["databus23/helm-diff"],
+      "groupName": "helm-diff",
       "minimumReleaseAge": "3 days"
     },
     {
