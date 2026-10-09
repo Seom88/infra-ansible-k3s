@@ -72,6 +72,12 @@
       "minimumReleaseAge": "7 days"
     },
     {
+      "description": "k3s: solo patches (ej. 1.36.5 -> 1.36.6); los saltos de minor se hacen a mano",
+      "matchPackageNames": ["k3s-io/k3s", "k3s-io/k3s-ansible"],
+      "matchUpdateTypes": ["minor", "major"],
+      "enabled": false
+    },
+    {
       "description": "Ansible Galaxy collections",
       "matchDatasources": ["galaxy-collection"],
       "groupName": "ansible-collections"
