@@ -8,15 +8,15 @@ reference, [`runbook.md`](runbook.md) for day-2 operations.
 
 ```
                       ┌────────────────────────────────────────────┐
-   Ansible control    │  site.yml (7 plays, ordered)               │
-   node (your laptop/ │   1. assert ansible-core ≥ 2.15            │
-   bastion)           │   2. baseline: base → firewalld →          │
-        │ SSH         │      kernel_modules → cockpit              │
-        │ become      │   3. k3s server  (k3s.orchestration 1.2.2) │
-        │ pipelining  │   4. k3s agents                             │
-        └────────────►│   5. Cilium release                        │
-                      │   6. Longhorn prereqs (all nodes)          │
-                      │   7. Argo CD release                       │
+   Ansible control    │  site.yml (3 imports, ordered)             │
+   node (your laptop/ │   1. base play: assert + base (common      │
+   bastion)           │      firewall) on managed_nodes            │
+        │ SSH         │   2. k3s play on k3s_cluster: k3s_prereqs  │
+        │ become      │      → kernel_modules → longhorn_prereqs   │
+        │ pipelining  │      → k3s server (k3s.orchestration 1.2.2)│
+        └────────────►│      → k3s agents → Cilium → Argo CD       │
+                      │   3. virtualization play: cockpit on       │
+                      │      hypervisors                           │
                       └───────────────────┬────────────────────────┘
                                           │
                  ┌────────────────────────▼───────────────────────┐
@@ -28,7 +28,8 @@ reference, [`runbook.md`](runbook.md) for day-2 operations.
                  │   secrets-enc,      Gateway API, Hubble,       │
                  │   no traefik)        L7 policies)              │
                  │                                                │
-                 │  firewalld (public zone)   cockpit + libvirt   │
+                 │  base common firewall + k3s_prereqs k3s rules  │
+                 │  (public zone)   cockpit + libvirt            │
                  │  kernel: br_netfilter, overlay, iscsi_tcp,     │
                  │          dm_crypt + sysctls                    │
                  └────────────────────────────────────────────────┘
@@ -57,15 +58,18 @@ Trusting the whole `/10` as a source would also outlive the interface it arrived
 Pod interfaces (`lxc*`) are ephemeral per endpoint, so pods keep CIDR-based source trust —
 the hybrid is deliberate: *trust identity where identity is stable, CIDR where it is not.*
 
-Ports opened in the public zone: `6443/tcp` (apiserver), `10250/tcp` (kubelet),
-`8472/udp` (VXLAN fallback), `4240/tcp` (Cilium health), `80/tcp` + `443/tcp`
-(Gateway), `41641/udp` (Tailscale), `9090/tcp` (Cockpit, only after the service is
-probed active). Masquerade is on; every change is validated with
+Ports opened in the public zone, each owned by the role that needs it
+(no central firewall role): `base` opens `41641/udp` (Tailscale), trusts
+`tailscale0` by interface and enables masquerade; `k3s_prereqs` opens
+`6443/tcp` (apiserver), `10250/tcp` (kubelet), `8472/udp` (VXLAN fallback),
+`4240/tcp` (Cilium health), `80/tcp` + `443/tcp` (Gateway) and trusts the pod /
+service CIDRs as sources; `cockpit` opens `9090/tcp` (service rule, only after
+the service is probed active). Every change is validated with
 `firewall-cmd --check-config` before reload.
 
 ## k3s configuration
 
-Pinned in `group_vars/all/main.yml`: **`k3s_version: v1.36.5+k3s1`**.
+Pinned in `inventory/group_vars/all/main.yml`: **`k3s_version: v1.36.5+k3s1`**.
 
 `server_config_yaml` turns k3s into "just the orchestration core":
 
@@ -156,7 +160,8 @@ Longhorn itself is *not* installed by this playbook — only its **node prerequi
 provide Cockpit (your package policy, your choice). What the role owns:
 
 - probe `cockpit.socket`/`cockpit.service` with `systemctl` — `service_facts` does not
-  see socket units — then open `9090` in firewalld
+  see socket units — then open `9090` in the host firewall (firewalld daemon,
+  `cockpit` service rule)
 - libvirt stack (`libvirt`, `qemu-kvm`, `virt-install`) when `cockpit_install_libvirt`
   is true; probe both monolithic (`libvirtd`) and modular (`virtqemud`, `virtstoraged`,
   `virtnetworkd`, `virtnodedevd`) socket units and assert the required ones listen
@@ -179,6 +184,7 @@ Selected entries from the commit history (full history: `git log --oneline`):
 | `6a4bd9f` | Tailscale trusted by interface; pod/service CIDRs as sources |
 | `0f50c91` | L7 Envoy × Tailscale fix: `accept_local` drop-in + LAN `k8sServiceHost` |
 | `8750b60` | Obsolete sysctl drop-ins removed; one canonical `99-k3s.conf` |
+| encapsulated-roles | central firewall role deleted; `base` keeps only the common firewall, `k3s_prereqs` (new) and `cockpit` own their rules — per-role firewall, no central writer |
 
 ## What I'd do differently
 

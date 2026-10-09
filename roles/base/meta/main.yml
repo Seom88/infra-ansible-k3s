@@ -3,8 +3,10 @@ galaxy_info:
   namespace: infra_k3s
   author: infra-k3s
   description: >-
-    Base OS layer for an AlmaLinux k3s node: guard rail, base packages,
-    conditional kernel-modules-extra install and time synchronisation.
+    Base OS layer for an AlmaLinux managed node: distribution guard rail,
+    generic packages (curl, tar, git), time synchronisation, host facts and
+    the common host firewall (daemon running, Tailscale port/interface,
+    masquerade). No k3s payload — that lives in k3s_prereqs.
   license: MIT
   min_ansible_version: "2.19"
   platforms:

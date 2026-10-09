@@ -1,0 +1,28 @@
+k3s_prereqs_role_enabled: true
+
+# socat has no consumer elsewhere in this repo (verified by grep before the
+# move): it only matters for k3s/Longhorn-ecosystem troubleshooting, so it
+# lives here instead of the generic base packages.
+k3s_prereqs_packages:
+  - socat
+
+k3s_prereqs_kernel_modules_extra_package: kernel-modules-extra
+k3s_prereqs_kernel_modules_extra_required_major: 10
+
+# helm-diff powers kubernetes.core.helm idempotency checks; pin it for reproducible runs.
+k3s_prereqs_helm_diff_version: "3.15.15"
+k3s_prereqs_helm_diff_git_tag: "v{{ k3s_prereqs_helm_diff_version }}"
+
+# k3s firewall: same zone base guarantees, k3s/ingress ports plus the pod
+# and service networks in trusted. Tailscale and masquerade stay in base.
+k3s_prereqs_firewall_zone: "{{ base_firewall_zone | default('public') }}"
+k3s_prereqs_k3s_ports:
+  - "6443/tcp"
+  - "10250/tcp"
+  - "8472/udp"
+  - "4240/tcp"
+  - "80/tcp"
+  - "443/tcp"
+k3s_prereqs_extra_ports: []
+k3s_prereqs_trusted_sources: >-
+  {{ [k3s_pod_cidr, k3s_service_cidr] }}

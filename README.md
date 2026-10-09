@@ -47,7 +47,7 @@ flowchart LR
         CIL["Cilium 1.20.2<br/>kube-proxy replacement · Gateway API · Hubble"]
         ARGO["Argo CD 10.9.2<br/>HA values · CiliumNetworkPolicies"]
         LH["Longhorn prereqs<br/>iscsi · dm_crypt · /mnt/data"]
-        COCK["Cockpit + libvirt<br/>port 9090 via firewalld"]
+        COCK["Cockpit + libvirt<br/>port 9090 · own firewall rule"]
     end
 
     EDGE["Tailscale<br/>tailnet edge access"] -->|tailscale0 trusted by interface| Node
@@ -68,21 +68,26 @@ the Helm release itself is GitOps-managed).
 ## What's inside
 
 ```
-site.yml                  # 7 plays: assert → baseline → k3s → Cilium → Longhorn prereqs → Argo CD
-group_vars/all/main.yml   # every tunable: k3s version, CIDRs, data paths, firewall switch
-inventory/hosts.yml       # server/agent groups, Tailscale-backed ansible_host
+site.yml                  # 3 imports: base → k3s → virtualization (plays live in plays/)
+plays/                    # one play per function: base.yml, k3s.yml, virtualization.yml
+inventory/hosts.yml       # server/agent groups, hypervisors, Tailscale-backed ansible_host
+inventory/group_vars/     # every tunable: k3s version, CIDRs, data paths, firewall switch
 values/                   # single source of truth for both Helm charts
   cilium/values.yaml      # + values-dev.yaml overlay reference
   argocd/values.yaml      # + values-dev.yaml single-node overlay
 roles/
-  base/                   # AlmaLinux baseline, Helm + helm-diff, chrony, cgroup v2
-  firewalld/              # ports, trusted CIDRs, tailscale0 interface, config validation
+  base/                   # AlmaLinux baseline: assert, curl/tar/git, chrony, facts, common firewall
+  k3s_prereqs/            # k3s payload: Helm + helm-diff, kernel-modules-extra, socat, k3s firewall
   kernel_modules/         # br_netfilter, overlay, sysctls, reboot-required detection
-  cockpit/                # cockpit + libvirt sockets, storage pool, SELinux fcontext
+  cockpit/                # cockpit + libvirt sockets, storage pool, SELinux fcontext, own 9090 rule
   cilium/                 # Gateway API CRDs → Cilium chart → accept_local fix
   longhorn_prereqs/       # iscsi/dm_crypt modules, filesystem assert, fail-loud checks
   argocd/                 # Argo CD chart, Lua health checks, CiliumNetworkPolicies
 ```
+
+Firewall is per-role on purpose: `base` owns only the common rules (daemon,
+Tailscale, masquerade); `k3s_prereqs` and `cockpit` open exactly what they
+need — a future docker-only node gets `base` and zero k3s packages.
 
 Each role is small, defaults-driven, and fail-loud: missing prerequisites assert with an
 actionable message instead of letting the cluster come up half-broken. Full role reference

@@ -17,73 +17,50 @@
         name: "{{ base_packages }}"
         state: present
 
-    - name: Check whether the Helm CLI is already installed
-      ansible.builtin.command: helm version --short
-      register: base_helm_probe
-      changed_when: false
-      failed_when: false
-      check_mode: false
+    - name: Configure the common host firewall
+      when: base_firewall_enabled | bool
+      block:
+        - name: Ensure firewalld is enabled and running
+          ansible.builtin.systemd:
+            name: "{{ base_firewall_service }}"
+            enabled: true
+            state: started
 
-    - name: Download the official Helm installer script
-      ansible.builtin.get_url:
-        url: https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
-        dest: /tmp/get-helm-3
-        mode: "0755"
-      when: base_helm_probe.rc != 0
+        - name: Open the Tailscale direct-connection port in the base zone
+          ansible.posix.firewalld:
+            port: "{{ item }}"
+            zone: "{{ base_firewall_zone }}"
+            permanent: true
+            immediate: true
+            state: enabled
+          loop: "{{ base_firewall_tailscale_ports }}"
+          loop_control:
+            label: "{{ item }}"
 
-    - name: Install the Helm CLI
-      ansible.builtin.command: bash /tmp/get-helm-3
-      when: base_helm_probe.rc != 0
-      changed_when: true
+        - name: Trust the Tailscale interface
+          ansible.posix.firewalld:
+            interface: "{{ item }}"
+            zone: trusted
+            permanent: true
+            immediate: true
+            state: enabled
+          loop: "{{ base_firewall_trusted_interfaces }}"
+          loop_control:
+            label: "{{ item }}"
 
-    # kubernetes.core.helm degrades its idempotency check without helm-diff installed.
-    - name: Check the installed helm-diff plugin version
-      ansible.builtin.command: helm plugin list
-      register: base_helm_plugin_probe
-      changed_when: false
-      failed_when: false
-      check_mode: false
+        - name: Enable masquerading in the base zone
+          ansible.posix.firewalld:
+            masquerade: true
+            zone: "{{ base_firewall_zone }}"
+            permanent: true
+            immediate: true
+            state: enabled
 
-    - name: Record the installed helm-diff plugin version
-      ansible.builtin.set_fact:
-        base_helm_diff_installed_version: >-
-          {{ base_helm_plugin_probe.stdout_lines
-             | select('match', '^diff\s')
-             | map('regex_replace', '^diff\s+(\S+).*', '\1')
-             | list
-             | default([''], true)
-             | first }}
-
-    - name: Remove the helm-diff plugin when it does not match the pinned version
-      ansible.builtin.command: helm plugin uninstall diff
-      when:
-        - base_helm_diff_installed_version != ''
-        - base_helm_diff_installed_version != base_helm_diff_version
-      changed_when: true
-
-    - name: Install the helm-diff plugin pinned to a known release
-      ansible.builtin.command: >-
-        helm plugin install https://github.com/databus23/helm-diff
-        --version {{ base_helm_diff_git_tag }}
-      when: base_helm_diff_installed_version != base_helm_diff_version
-      changed_when: true
-
-    - name: Install kernel-modules-extra pinned to the running kernel
-      ansible.builtin.dnf:
-        name: "{{ base_kernel_modules_extra_package }}-{{ ansible_facts['kernel'] }}"
-        state: present
-      register: base_kernel_modules_extra_pinned
-      failed_when: false
-      when: >-
-        kernel_modules_extra_required_major is defined
-        and ansible_facts['distribution_major_version'] | int
-        >= kernel_modules_extra_required_major | int
-
-    - name: Fall back to the unversioned kernel-modules-extra package
-      ansible.builtin.dnf:
-        name: "{{ base_kernel_modules_extra_package }}"
-        state: present
-      when: base_kernel_modules_extra_pinned.failed | default(false) | bool
+        - name: Validate the permanent firewalld configuration
+          ansible.builtin.command:
+            cmd: firewall-cmd --check-config
+          register: base_firewall_check_config
+          changed_when: false
 
     - name: Enable and start the time synchronisation service
       ansible.builtin.systemd:

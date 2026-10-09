@@ -1,12 +1,13 @@
 ---
 galaxy_info:
-  role_name: firewalld
+  role_name: k3s_prereqs
   namespace: infra_k3s
   author: infra-k3s
   description: >-
-    Configures (never disables) the host firewall for an AlmaLinux k3s node:
-    k3s and Cilium ports, pod/service/Tailscale trusted sources, and
-    masquerading.
+    k3s host prerequisites for an AlmaLinux node: Helm CLI with the pinned
+    helm-diff plugin, kernel-modules-extra, socat, and the k3s firewall rules
+    (k3s/ingress ports plus pod/service CIDRs in trusted). Runs before
+    k3s_server on k3s_cluster hosts.
   license: MIT
 
   min_ansible_version: "2.19"
@@ -19,7 +20,6 @@ galaxy_info:
     - alma
     - almalinux
     - rhel
-    - firewalld
     - firewall
     - k3s
 

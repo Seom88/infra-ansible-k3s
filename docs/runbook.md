@@ -14,13 +14,16 @@ ansible-playbook site.yml
 
 What to expect, in order:
 
-1. Baseline (`base` → `firewalld` → `kernel_modules` → `cockpit`) — mostly `ok` on a
-   second run.
-2. k3s server + agents — the upstream collection reports the cluster coming up.
+1. Base play (`base` on managed nodes, common firewall included) — mostly `ok`
+   on a second run.
+2. k3s play — `k3s_prereqs` + `kernel_modules` + Longhorn prereqs (all on
+   `k3s_cluster`, before the server), then k3s server + agents — the upstream
+   collection reports the cluster coming up.
 3. Cilium — preflight fails early if helm/kubeconfig are missing.
 4. Longhorn prereqs — may stop with **reboot required** if kernel modules are missing
    for the running kernel.
 5. Argo CD — installs last, `wait` up to 900 s.
+6. Virtualization play (`cockpit` on hypervisors, own `9090` rule).
 
 > **Reboot contract:** nothing reboots itself. If a role reports `reboot required`,
 > reboot the node (or use `ansible.builtin.reboot`) and re-run the playbook — the
@@ -129,11 +132,11 @@ Pinned versions move deliberately — bump one pin at a time, re-run, verify:
 
 | Pin | Where |
 | --- | --- |
-| k3s | `group_vars/all/main.yml` → `k3s_version` |
+| k3s | `inventory/group_vars/all/main.yml` → `k3s_version` |
 | Cilium chart | `roles/cilium/defaults/main.yml` → `cilium_chart_version` |
 | Gateway API CRDs | `roles/cilium/defaults/main.yml` → `cilium_gateway_api_version` |
 | Argo CD chart | `roles/argocd/defaults/main.yml` → `argocd_chart_version` |
-| helm-diff | `roles/base/defaults/main.yml` |
+| helm-diff | `roles/k3s_prereqs/defaults/main.yml` |
 | k3s-orchestration | `requirements.yml` → tag `1.2.2` |
 | Helm values | `values/cilium/values.yaml`, `values/argocd/values.yaml` |
 
@@ -144,8 +147,8 @@ node at a time.
 ## Adding a node
 
 1. Add an `agent` host under `k3s_cluster` in `inventory/hosts.yml`.
-2. Run `ansible-playbook site.yml` — plays 2, 4, and 6 cover baselining, agent join,
-   and Longhorn prerequisites automatically.
+2. Run `ansible-playbook site.yml` — the base play baselines it and the k3s
+   play covers prereqs, agent join, and Longhorn prerequisites automatically.
 3. Verify: `kubectl get nodes` shows the new node `Ready`.
 
 ## Nightly hygiene

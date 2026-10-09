@@ -5,16 +5,20 @@ base_supported_major_versions:
 base_packages:
   - curl
   - tar
-  - socat
-  - git  # helm plugin install clones the plugin repo
+  - git
 
-base_kernel_modules_extra_package: kernel-modules-extra
 base_time_sync_service: chronyd
 base_cgroup_v2_marker: /sys/fs/cgroup/cgroup.controllers
 
-# helm-diff powers kubernetes.core.helm idempotency checks; pin it for reproducible runs.
-base_helm_diff_version: "3.15.15"
-base_helm_diff_git_tag: "v{{ base_helm_diff_version }}"
+# Common firewall owned by base: every managed node gets firewalld running,
+# the Tailscale direct-connection port, tailscale0 in trusted and masquerade.
+# Per-service rules (k3s ports, cockpit) live in the owning role.
+base_firewall_enabled: true
+base_firewall_service: firewalld
+base_firewall_zone: public
+base_firewall_tailscale_ports:
+  - "41641/udp"
+base_firewall_trusted_interfaces:
+  - tailscale0
 
 base_role_enabled: true
-kernel_modules_extra_required_major: 10  # noqa: var-naming[no-role-prefix]

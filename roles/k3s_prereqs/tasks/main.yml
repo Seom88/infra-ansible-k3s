@@ -1,0 +1,107 @@
+- name: Install the k3s host prerequisites
+  when: k3s_prereqs_role_enabled | bool
+  block:
+
+    - name: Install the k3s host packages
+      ansible.builtin.dnf:
+        name: "{{ k3s_prereqs_packages }}"
+        state: present
+
+    - name: Check whether the Helm CLI is already installed
+      ansible.builtin.command: helm version --short
+      register: k3s_prereqs_helm_probe
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Download the official Helm installer script
+      ansible.builtin.get_url:
+        url: https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+        dest: /tmp/get-helm-3
+        mode: "0755"
+      when: k3s_prereqs_helm_probe.rc != 0
+
+    - name: Install the Helm CLI
+      ansible.builtin.command: bash /tmp/get-helm-3
+      when: k3s_prereqs_helm_probe.rc != 0
+      changed_when: true
+
+    # kubernetes.core.helm degrades its idempotency check without helm-diff installed.
+    - name: Check the installed helm-diff plugin version
+      ansible.builtin.command: helm plugin list
+      register: k3s_prereqs_helm_plugin_probe
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Record the installed helm-diff plugin version
+      ansible.builtin.set_fact:
+        k3s_prereqs_helm_diff_installed_version: >-
+          {{ k3s_prereqs_helm_plugin_probe.stdout_lines
+             | select('match', '^diff\s')
+             | map('regex_replace', '^diff\s+(\S+).*', '\1')
+             | list
+             | default([''], true)
+             | first }}
+
+    - name: Remove the helm-diff plugin when it does not match the pinned version
+      ansible.builtin.command: helm plugin uninstall diff
+      when:
+        - k3s_prereqs_helm_diff_installed_version != ''
+        - k3s_prereqs_helm_diff_installed_version != k3s_prereqs_helm_diff_version
+      changed_when: true
+
+    - name: Install the helm-diff plugin pinned to a known release
+      ansible.builtin.command: >-
+        helm plugin install https://github.com/databus23/helm-diff
+        --version {{ k3s_prereqs_helm_diff_git_tag }}
+      when: k3s_prereqs_helm_diff_installed_version != k3s_prereqs_helm_diff_version
+      changed_when: true
+
+    - name: Install kernel-modules-extra pinned to the running kernel
+      ansible.builtin.dnf:
+        name: "{{ k3s_prereqs_kernel_modules_extra_package }}-{{ ansible_facts['kernel'] }}"
+        state: present
+      register: k3s_prereqs_kernel_modules_extra_pinned
+      failed_when: false
+      when: >-
+        k3s_prereqs_kernel_modules_extra_required_major is defined
+        and ansible_facts['distribution_major_version'] | int
+        >= k3s_prereqs_kernel_modules_extra_required_major | int
+
+    - name: Fall back to the unversioned kernel-modules-extra package
+      ansible.builtin.dnf:
+        name: "{{ k3s_prereqs_kernel_modules_extra_package }}"
+        state: present
+      when: k3s_prereqs_kernel_modules_extra_pinned.failed | default(false) | bool
+
+    - name: Configure the k3s host firewall
+      when: base_firewall_enabled | default(true) | bool
+      block:
+        - name: Open the k3s and ingress ports in the k3s zone
+          ansible.posix.firewalld:
+            port: "{{ item }}"
+            zone: "{{ k3s_prereqs_firewall_zone }}"
+            permanent: true
+            immediate: true
+            state: enabled
+          loop: "{{ k3s_prereqs_k3s_ports + k3s_prereqs_extra_ports }}"
+          loop_control:
+            label: "{{ item }}"
+
+        - name: Trust the pod and service networks
+          ansible.posix.firewalld:
+            source: "{{ item }}"
+            zone: trusted
+            permanent: true
+            immediate: true
+            state: enabled
+          loop: "{{ k3s_prereqs_trusted_sources }}"
+          loop_control:
+            label: "{{ item }}"
+
+        - name: Validate the permanent firewalld configuration
+          ansible.builtin.command:
+            cmd: firewall-cmd --check-config
+          register: k3s_prereqs_firewall_check_config
+          changed_when: false

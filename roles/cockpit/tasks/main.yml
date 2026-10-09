@@ -98,7 +98,9 @@
     permanent: true
     immediate: true
     state: enabled
-  when: cockpit_role_enabled | bool and firewalld_enabled | bool
+  # base runs before virtualization, so firewalld is already up when this
+  # runs; skip only when firewall management is disabled altogether.
+  when: cockpit_role_enabled | bool and base_firewall_enabled | default(true) | bool
 
 - name: Manage the libvirt storage pool for Cockpit Machines
   when: cockpit_role_enabled | bool and cockpit_libvirt_pool_enabled | bool

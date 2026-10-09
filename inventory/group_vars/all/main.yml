@@ -7,7 +7,7 @@ k3s_pod_cidr: 10.42.0.0/16
 k3s_service_cidr: 10.43.0.0/16
 tailscale_cidr: 100.64.0.0/10
 
-# firewalld role manages the firewall; keep upstream k3s-ansible from touching it
+# base/k3s_prereqs/cockpit own their firewall rules; keep upstream k3s-ansible from touching it
 manage_firewall: false
 
 server_config_yaml: |

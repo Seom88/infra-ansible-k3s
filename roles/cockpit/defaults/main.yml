@@ -37,7 +37,8 @@ cockpit_systemd_unit_dir: /usr/lib/systemd/system
 
 cockpit_url_host: "{{ ansible_facts['hostname'] }}"
 
-cockpit_firewall_zone: "{{ firewalld_zone | default('public') }}"
+# Same zone base guarantees firewalld on; base runs before virtualization.
+cockpit_firewall_zone: "{{ base_firewall_zone | default('public') }}"
 
 cockpit_install_libvirt: true
 libvirt_packages:  # noqa: var-naming[no-role-prefix]

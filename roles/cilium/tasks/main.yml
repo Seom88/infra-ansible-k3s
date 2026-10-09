@@ -67,7 +67,7 @@
 
 - name: Load Helm values
   ansible.builtin.set_fact:
-    cilium_values: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/values/cilium/values.yaml') | from_yaml }}"
+    cilium_values: "{{ lookup('ansible.builtin.file', inventory_dir ~ '/../values/cilium/values.yaml') | from_yaml }}"
 
 - name: Install Gateway API CRDs required by gatewayAPI.enabled
   ansible.builtin.command:

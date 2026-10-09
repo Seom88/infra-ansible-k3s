@@ -1,0 +1,16 @@
+- name: Prepare the AlmaLinux node
+  hosts: managed_nodes
+  become: true
+  gather_facts: true
+  pre_tasks:
+    - name: Put /usr/local/bin on the sudo secure_path so k3s is reachable
+      ansible.builtin.lineinfile:
+        path: /etc/sudoers
+        regexp: '^Defaults(\s)*secure_path(\s)*='
+        line: "Defaults    secure_path = /sbin:/bin:/usr/sbin:/usr/bin:/usr/local/bin"
+        state: present
+        insertafter: EOF
+        validate: 'visudo -cf %s'
+
+  roles:
+    - role: base

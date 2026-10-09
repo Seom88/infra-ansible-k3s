@@ -51,7 +51,7 @@
 
 - name: Load Helm values
   ansible.builtin.set_fact:
-    argocd_values: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/values/argocd/values.yaml') | from_yaml }}"
+    argocd_values: "{{ lookup('ansible.builtin.file', inventory_dir ~ '/../values/argocd/values.yaml') | from_yaml }}"
 
 - name: Install or upgrade the Argo CD release
   kubernetes.core.helm:
