@@ -44,6 +44,11 @@
     repo_url: "{{ argocd_chart_repo_url }}"
     repo_state: present
 
+- name: Refresh the Argo CD chart repository index so new chart versions resolve
+  ansible.builtin.command:
+    cmd: "{{ argocd_helm_binary }} repo update {{ argocd_chart_repo_name }}"
+  changed_when: false
+
 - name: Load Helm values
   ansible.builtin.set_fact:
     argocd_values: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/values/argocd/values.yaml') | from_yaml }}"
