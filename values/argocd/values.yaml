@@ -1,6 +1,6 @@
 # ArgoCD — keep NetworkPolicy ENABLED (Cilium enforces; Flannel ignored)
 # Do NOT set global.networkPolicy.create to false — Cilium strict enforcement requires explicit allows
-# for kube-apiserver/host (port-forward) and tailscale gateway (ts-ingress).
+# for kube-apiserver/host (port-forward) and the per-app Tailscale Ingress (ADR-018).
 global:
   networkPolicy:
     create: true
@@ -91,7 +91,9 @@ dex:
 # ArgoCD Helm chart values
 configs:
   params:
-    # Gateway strip mode — ArgoCD served at /argocd via my-cluster gateway, keep insecure for http proxy
+    # ArgoCD is served at / root by its own Tailscale Ingress (ADR-018
+    # supersedes ADR-012). TLS terminates at the proxy, so the container speaks
+    # plain HTTP: server.insecure=true.
     server.insecure: "true"
   cm:
     # Custom health checks
@@ -229,7 +231,7 @@ configs:
 # argocd-server but restrictive on repo-server/dex/redis/etc). These
 # CiliumNetworkPolicies inject explicit allows for:
 #  1) kubectl port-forward / exec / logs (kube-apiserver + host/remote-node)
-#  2) Tailscale gateway ts-ingress (cluster-gateway in tailscale ns) -> argocd-server
+#  2) the Tailscale Ingress proxies serving argocd.lonk-mirfak.ts.net at / root
 # Injected via extraObjects so fix lives in infra (correct ownership), not gitops.
 # Vault's CiliumNetworkPolicy pattern (vault-allow-ingress-cilium) is the reference.
 extraObjects:
@@ -258,12 +260,17 @@ extraObjects:
                   protocol: TCP
                 - port: "8082"
                   protocol: TCP
-  # 2) Tailscale gateway -> argocd-server — allow ts-ingress cluster-gateway in tailscale ns
-  # Gateway: cluster-gateway (app.kubernetes.io/name=cluster-gateway) in namespace tailscale
-  # Chart: platform/ts-ingress (hybrid gateway my-cluster) proxies
-  #   https://my-cluster.lonk-mirfak.ts.net/argocd/ -> http://argocd-server.argocd.svc.cluster.local:80/ (port 80 -> target 8080)
-  # Cilium strict: narrow label selectors break on drift — provide precise label match + namespace-only fallback + fromEntities cluster.
-  # endpointSelector narrowed to argocd-server only (not all pods) — principle of least privilege.
+  # 2) Tailscale Ingress proxies -> argocd-server.
+  # ADR-018 superseded ADR-012: the NGINX cluster-gateway was deleted and
+  # every app is served at / root by its own Tailscale Ingress. The proxies
+  # that reach this pod are spawned per Ingress by the tailscale-operator and
+  # they carry the label tailscale.com/managed=true — the same selector that
+  # ts-operator-proxy-egress already relies on. It replaces the removed
+  # cluster-gateway label match.
+  # Port 8080 is the POD port (Cilium matches post-DNAT), not the Service
+  # port 80.
+  # endpointSelector stays narrowed to argocd-server only — principle of least
+  # privilege.
   - apiVersion: cilium.io/v2
     kind: CiliumNetworkPolicy
     metadata:
@@ -274,24 +281,16 @@ extraObjects:
         matchLabels:
           app.kubernetes.io/name: argocd-server
       ingress:
-        # Precise gateway pod — match both namespace and app label (ts-ingress gateway-deployment.yaml)
         - fromEndpoints:
             - matchLabels:
-                k8s:io.kubernetes.pod.namespace: tailscale
-                k8s:app.kubernetes.io/name: cluster-gateway
+                k8s:tailscale.com/managed: "true"
           toPorts:
             - ports:
                 - port: "8080"
                   protocol: TCP
-        # Fallback namespace-only (label drift resilient, mirrors ts-ingress allow-egress pattern)
-        - fromEndpoints:
-            - matchLabels:
-                k8s:io.kubernetes.pod.namespace: tailscale
-          toPorts:
-            - ports:
-                - port: "8080"
-                  protocol: TCP
-        # Fallback cluster entity (covers Cilium kubeProxyReplacement=strict, Tailscale encap, hostNetwork proxied)
+        # Fallback cluster entity (covers Cilium kubeProxyReplacement=strict,
+        # Tailscale encap, hostNetwork proxied). Pre-existing permissive
+        # behaviour, deliberately left as-is.
         - fromEntities:
             - cluster
           toPorts:
