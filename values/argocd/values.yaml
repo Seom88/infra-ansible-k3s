@@ -17,7 +17,7 @@ global:
 # Requests are the scheduling floor and the HPA signal; limits stay generous
 # so bursts never throttle a control plane.
 controller:
-  replicas: 2
+  replicas: 1 # Only one node, so only one controller pod.
   resources:
     requests:
       cpu: 300m
