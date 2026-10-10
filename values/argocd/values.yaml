@@ -6,21 +6,87 @@ global:
     create: true
     defaultDenyIngress: false
 
+# Single bare-metal node (ADR-019): 2 replicas buys zero-downtime restarts
+# for the control plane that lands every other change.
+# ADR-019 never reduced ArgoCD.
+#
+# requests are not optional here. Both HPAs below compute usage/request, so a
+# target with no memory request makes the HPA permanently unable to scale out:
+# kube-controller-manager logged 958 "missing request for memory" errors in 2h
+# against argocd-server and argocd-repo-server before this block existed.
+# Requests are the scheduling floor and the HPA signal; limits stay generous
+# so bursts never throttle a control plane.
 controller:
   replicas: 2
+  resources:
+    requests:
+      cpu: 300m
+      memory: 1Gi
+    limits:
+      cpu: "2"
+      memory: 2Gi
 
 server:
   autoscaling:
     enabled: true
     minReplicas: 2
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
 
 repoServer:
   autoscaling:
     enabled: true
     minReplicas: 2
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
 
 applicationSet:
   replicas: 2
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+# Floor plus limit so these stop being BestEffort with no scheduling signal.
+redis:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+notifications:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+dex:
+  resources:
+    requests:
+      cpu: 20m
+      memory: 32Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
 
 # ArgoCD Helm chart values
 configs:
