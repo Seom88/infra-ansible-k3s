@@ -21,4 +21,23 @@ base_firewall_tailscale_ports:
 base_firewall_trusted_interfaces:
   - tailscale0
 
+# Kernel command line parameters this node needs, applied to both
+# /etc/default/grub (GRUB_CMDLINE_LINUX) and /etc/kernel/cmdline so the
+# value survives a BLS migration or the next kernel upgrade.
+#
+# usbcore.quirks=0bda:9201:k disables USB Link Power Management for the
+# Realtek RTL9201R USB-SATA bridge. On this node the kernel repeatedly logs
+# "enable of device-initiated U1 failed" on that bus and xhci resets the
+# device within the same second, taking the disk off the bus. The quirk is
+# matched per vendor:product, so it only affects that bridge and never any
+# other USB device. Empty the list to stop managing the kernel command line.
+base_kernel_params:
+  - name: usbcore.quirks
+    value: "0bda:9201:k"
+
+base_grub_defaults_file: /etc/default/grub
+base_grub_config_file: /boot/grub2/grub.cfg
+base_kernel_cmdline_file: /etc/kernel/cmdline
+base_grub_backup_file: /etc/default/grub.bak
+
 base_role_enabled: true

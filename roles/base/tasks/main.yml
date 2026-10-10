@@ -86,3 +86,143 @@
         base_selinux_status: >-
           {{ ansible_facts['selinux']['status'] | default('disabled', true)
              if ansible_facts['selinux'] | default(false) else 'disabled' }}
+
+    - name: Manage the kernel command line parameters this node needs
+      when: base_kernel_params | length > 0
+      block:
+
+        - name: Back up the GRUB defaults file before editing it
+          ansible.builtin.copy:
+            src: "{{ base_grub_defaults_file }}"
+            dest: "{{ base_grub_backup_file }}"
+            remote_src: true
+            owner: root
+            group: root
+            mode: "0600"
+            force: false
+
+        - name: Read the current GRUB defaults file
+          ansible.builtin.slurp:
+            src: "{{ base_grub_defaults_file }}"
+          register: base_grub_defaults_raw
+
+        - name: Fail when the GRUB defaults file has no kernel parameter line to edit
+          ansible.builtin.assert:
+            that:
+              - "'GRUB_CMDLINE_LINUX=' in base_grub_defaults_text"
+            fail_msg: >-
+              {{ base_grub_defaults_file }} has no GRUB_CMDLINE_LINUX assignment, so
+              {{ base_kernel_params | map(attribute='name') | join(', ') }} cannot be
+              applied. Refusing to touch the bootloader configuration.
+            quiet: true
+          vars:
+            base_grub_defaults_text: "{{ base_grub_defaults_raw.content | b64decode }}"
+
+        # The whole GRUB_CMDLINE_LINUX value is rebuilt here as one plain string and
+        # handed to lineinfile as the replacement line. No backrefs are used on
+        # purpose: lineinfile expands \1 followed by a digit as a group number, so a
+        # value like 0bda:9201:k would silently corrupt the line. Rebuilding the
+        # value also keeps the role idempotent when the parameter is already set,
+        # because lineinfile reports no change when the line already matches.
+        - name: Record the current kernel command line tokens
+          ansible.builtin.set_fact:
+            base_grub_cmdline_current: >-
+              {{ ((base_grub_defaults_raw.content | b64decode)
+                  | regex_findall('^GRUB_CMDLINE_LINUX="([^"]*)"', multiline=True) | first
+                 | default('', true) | split()) }}
+
+        # A parameter already present is kept at the position and value it has, so
+        # a node where the quirk was added by hand is not rewritten differently.
+        - name: Record the kernel command line with every managed parameter added
+          ansible.builtin.set_fact:
+            base_grub_cmdline: >-
+              {%- set existing = base_grub_cmdline_current -%}
+              {%- set present = existing | map('regex_replace', '=.*$', '') | list -%}
+              {%- set missing = base_kernel_params
+                    | rejectattr('name', 'in', present) | list -%}
+              {%- set additions = [] -%}
+              {%- for p in missing -%}
+              {%- set _ = additions.append(p.name ~ '=' ~ p.value) -%}
+              {%- endfor -%}
+              {{ (existing + additions) | join(' ') | trim }}
+
+        - name: Detect whether BLS snippets are in use on this node
+          ansible.builtin.stat:
+            path: /boot/loader/entries
+          register: base_grub_bls_probe
+
+        - name: Record whether the GRUB regeneration must update the BLS snippets
+          ansible.builtin.set_fact:
+            base_grub_bls_enabled: "{{ base_grub_bls_probe.stat.exists }}"
+
+        - name: Set the kernel command line to carry every managed parameter
+          ansible.builtin.lineinfile:
+            path: "{{ base_grub_defaults_file }}"
+            regexp: '^GRUB_CMDLINE_LINUX='
+            line: 'GRUB_CMDLINE_LINUX="{{ base_grub_cmdline }}"'
+            state: present
+          register: base_grub_cmdline_line
+
+        - name: Regenerate the GRUB configuration
+          ansible.builtin.command:
+            cmd: >-
+              grub2-mkconfig -o {{ base_grub_config_file }}{{
+              ' --update-bls-cmdline' if base_grub_bls_enabled else '' }}
+          register: base_grub_regen
+          changed_when: base_grub_cmdline_line is changed
+
+        # /etc/kernel/cmdline is NOT the same content as GRUB_CMDLINE_LINUX: it also
+        # carries root= and ro, which grub2-mkconfig adds from elsewhere. Writing
+        # the GRUB value over it would drop root= and leave an LVM node unable to
+        # mount its root filesystem, so each file is compared against its own
+        # current tokens and only the missing parameters are appended.
+        - name: Read the current kernel cmdline file
+          ansible.builtin.slurp:
+            src: "{{ base_kernel_cmdline_file }}"
+          register: base_kernel_cmdline_raw
+
+        - name: Record the kernel cmdline file tokens with every managed parameter added
+          ansible.builtin.set_fact:
+            base_kernel_cmdline_new: >-
+              {%- set existing = base_kernel_cmdline_raw.content | b64decode | split() -%}
+              {%- set present = existing | map('regex_replace', '=.*$', '') | list -%}
+              {%- set missing = base_kernel_params
+                    | rejectattr('name', 'in', present) | list -%}
+              {%- set additions = [] -%}
+              {%- for p in missing -%}
+              {%- set _ = additions.append(p.name ~ '=' ~ p.value) -%}
+              {%- endfor -%}
+              {{ (existing + additions) | join(' ') | trim }}
+
+        - name: Keep the kernel cmdline file in sync with the GRUB defaults file
+          ansible.builtin.copy:
+            content: "{{ base_kernel_cmdline_new }}\n"
+            dest: "{{ base_kernel_cmdline_file }}"
+            owner: root
+            group: root
+            mode: "0600"
+          register: base_kernel_cmdline_sync
+
+        - name: Confirm every kernel parameter reached the generated GRUB configuration
+          ansible.builtin.command:
+            # argv form, not a shell string: the character class contains quotes
+            # that would otherwise break the command module's own parsing.
+            argv:
+              - grep
+              - -oF
+              - --
+              - "{{ item.name }}={{ item.value }}"
+              - "{{ base_grub_config_file }}"
+          loop: "{{ base_kernel_params }}"
+          loop_control:
+            label: "{{ item.name }}={{ item.value }}"
+          register: base_kernel_params_verify
+          changed_when: false
+
+        - name: Report that a reboot is required to activate the kernel parameters
+          ansible.builtin.debug:
+            msg: >-
+              Kernel command line now carries
+              {{ base_kernel_params | map(attribute='name') | join(', ') }}. The kernel takes
+              effect only on the next boot; reboot the node to activate it. The previous
+              GRUB defaults file is kept at {{ base_grub_backup_file }}.
