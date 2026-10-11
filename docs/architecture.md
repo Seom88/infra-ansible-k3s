@@ -49,7 +49,7 @@ firewall rules explicable:
 | --- | --- | --- | --- |
 | Pod network | `10.42.0.0/16` | Cilium (cluster-pool IPAM) | trusted **source** on public zone |
 | Service network | `10.43.0.0/16` | Cilium (kube-proxy replacement) | trusted **source** on public zone |
-| Node LAN | e.g. `192.168.2.0/24` | Ethernet | k3s/Cockpit ports opened explicitly |
+| Node LAN | e.g. `192.168.2.0/24` | Ethernet | k3s/Cockpit ports opened explicitly; advertised into the tailnet as a route |
 | Tailnet | `100.64.0.0/10` | `tailscale0` interface | trusted **by interface**, not by CIDR |
 
 Why interface-based trust for Tailscale: tailnet IPs are assigned dynamically and change
@@ -57,6 +57,22 @@ across re-auths; the `tailscale0` interface name is stable for as long as Tailsc
 Trusting the whole `/10` as a source would also outlive the interface it arrived on.
 Pod interfaces (`lxc*`) are ephemeral per endpoint, so pods keep CIDR-based source trust —
 the hybrid is deliberate: *trust identity where identity is stable, CIDR where it is not.*
+
+`base` makes the LAN reachable **from the tailnet** with two mechanisms that belong to
+different layers:
+
+- `tailscale set --advertise-routes=192.168.2.0/24` — the node becomes a subnet router, so
+  the tailnet can reach the LAN. Publishing a route is not the same as using it: it must be
+  approved in the Tailscale admin console (or allowed by an `autoApprovers` tailnet policy
+  rule), and this repo never touches the tailnet policy.
+- `net.ipv4.ip_forward=1` — what actually moves packets between `tailscale0` and the LAN.
+  `base` keeps it in `/etc/sysctl.d/99-tailscale.conf` so a hypervisor-only node is a
+  working router without running the k3s play; `kernel_modules` writes the same key into
+  the canonical `99-k3s.conf` for cluster nodes.
+
+The other direction is *not* symmetrical: the LAN is not a second entrance to the tailnet.
+`tailscale0` stays a trusted interface, so a tailnet identity reaching the LAN is still
+authenticated by Tailscale, not by being on the switch.
 
 Ports opened in the public zone, each owned by the role that needs it
 (no central firewall role): `base` opens `41641/udp` (Tailscale), trusts
@@ -169,6 +185,11 @@ provide Cockpit (your package policy, your choice). What the role owns:
   fcontext **`virt_image_t`** (verified: `qemu_image_t` is *wrong* for `virt_image_t`
   paths — `semanage fcontext` rejects the mistaken pattern, and `restorecon` is applied
   idempotently)
+- **publishing the console in the tailnet** with `tailscale serve --bg --yes
+  https+insecure://localhost:9090`, behind the same package assertion (see
+  [`roles.md`](roles.md#cockpit) for why `https+insecure` and how the change signal is
+  computed). This is not in `plays/virtualization.yml`: the play only lists roles, and the
+  tunnel is a property of "this node has Cockpit", not of the play that happens to drive it.
 
 ## Decision log
 

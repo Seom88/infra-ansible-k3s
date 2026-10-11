@@ -62,6 +62,116 @@
           register: base_firewall_check_config
           changed_when: false
 
+    # Ordered after the firewall block on purpose: masquerade and the trusted
+    # tailscale0 interface are the prerequisites that make an advertised route
+    # actually forward packets.
+    - name: Advertise the node LAN routes through Tailscale
+      when: base_tailscale_advertise_routes | length > 0
+      vars:
+        # Parsed at block scope so both the connection guard and the closing
+        # approval report read the same daemon snapshot.
+        base_tailscale_state: "{{ base_tailscale_status.stdout | from_json }}"
+      block:
+
+        - name: Look for the Tailscale CLI on this node
+          ansible.builtin.stat:
+            path: "{{ base_tailscale_binary }}"
+          register: base_tailscale_binary_probe
+
+        - name: Refuse to advertise routes without the Tailscale CLI
+          ansible.builtin.assert:
+            that:
+              - base_tailscale_binary_probe.stat.exists
+            fail_msg: >-
+              {{ base_tailscale_binary }} does not exist on this host, so
+              {{ base_tailscale_advertise_routes | join(', ') }} cannot be
+              advertised. This role does not install Tailscale; install it or set
+              base_tailscale_advertise_routes: [] in group_vars to opt out.
+
+        - name: Read the Tailscale daemon state
+          ansible.builtin.command:
+            argv:
+              - "{{ base_tailscale_binary }}"
+              - status
+              - --json
+          register: base_tailscale_status
+          changed_when: false
+          check_mode: false
+
+        # A logged-out daemon exits 0 and reports NeedsLogin, and `tailscale
+        # set` would answer with an auth URL instead of applying the routes.
+        - name: Refuse to advertise routes on a node that is not connected
+          ansible.builtin.assert:
+            that:
+              - base_tailscale_state.BackendState == "Running"
+            fail_msg: >-
+              The Tailscale daemon reports BackendState
+              {{ base_tailscale_state.BackendState | default('unreadable') }}, not
+              "Running", so advertising routes would be refused. Run
+              'tailscale up' on this host and re-run the playbook.
+
+
+        # `tailscale debug prefs` is a debug surface, but it is the only
+        # read-only way to see the declarative AdvertiseRoutes pref:
+        # `tailscale status --json` only exposes routes once control has
+        # approved them, which would make the idempotency check depend on an
+        # action taken outside this playbook.
+        - name: Read the routes this node already advertises
+          ansible.builtin.command:
+            argv:
+              - "{{ base_tailscale_binary }}"
+              - debug
+              - prefs
+          register: base_tailscale_prefs
+          changed_when: false
+          failed_when: false
+          check_mode: false
+
+        - name: Enable IP forwarding so this node can actually route the subnets
+          ansible.posix.sysctl:
+            name: net.ipv4.ip_forward
+            value: "1"
+            sysctl_file: "{{ base_tailscale_sysctl_file }}"
+            sysctl_set: true
+            state: present
+            reload: true
+
+        - name: Advertise the subnets into the tailnet
+          ansible.builtin.command:
+            argv:
+              - "{{ base_tailscale_binary }}"
+              - set
+              - "--advertise-routes={{ base_tailscale_advertise_routes | join(',') }}"
+          register: base_tailscale_advertise
+          changed_when: true
+          when:
+            - base_tailscale_advertised_routes | sort
+              != base_tailscale_advertise_routes | sort
+          vars:
+            base_tailscale_advertised_routes: >-
+              {{ (base_tailscale_prefs.stdout | default('', true) | trim | from_json)
+                 .get('AdvertiseRoutes') | default([], true) }}
+
+        - name: Report which advertised routes are still waiting for approval
+          ansible.builtin.debug:
+            msg: >-
+              This node advertises {{ base_tailscale_advertise_routes | join(', ') }}
+              to the tailnet. Still unapproved (they carry no traffic yet):
+              {{ base_tailscale_unapproved_routes | default([], true) | join(', ') }}.
+              Approve them in the Tailscale admin console or allow them with an
+              `autoApprovers` rule; `Self.AllowedIPs` in `tailscale status --json`
+              is the observable signal. This role never edits the tailnet policy.
+          vars:
+            base_tailscale_unapproved_routes: >-
+              {%- set approved = base_tailscale_state.Self.AllowedIPs | default([]) -%}
+              {%- set unapproved = [] -%}
+              {%- for route in base_tailscale_advertise_routes -%}
+              {%-   if route not in approved -%}
+              {%-     set _ = unapproved.append(route) -%}
+              {%-   endif -%}
+              {%- endfor -%}
+              {{ unapproved }}
+
     - name: Enable and start the time synchronisation service
       ansible.builtin.systemd:
         name: "{{ base_time_sync_service }}"

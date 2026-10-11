@@ -21,6 +21,22 @@ base_firewall_tailscale_ports:
 base_firewall_trusted_interfaces:
   - tailscale0
 
+# Tailscale subnet router: advertise the node LAN so the tailnet can reach it.
+# Advertising only *publishes* the route — it carries traffic only once it is
+# approved in the Tailscale admin console (or allowed by an `autoApprovers`
+# tailnet policy rule). This role never touches the tailnet policy file.
+base_tailscale_advertise_routes:
+  - 192.168.2.0/24
+
+base_tailscale_binary: /usr/bin/tailscale
+
+# `kernel_modules` already writes net.ipv4.ip_forward=1 into the canonical
+# /etc/sysctl.d/99-k3s.conf, but only for cluster nodes and only when the k3s
+# play runs. base keeps its own drop-in so a hypervisor-only node (no k3s
+# play) is still a working subnet router; both files agree on the value, and
+# sysctl applies drop-ins in lexical order, so the two never disagree.
+base_tailscale_sysctl_file: /etc/sysctl.d/99-tailscale.conf
+
 # Kernel command line parameters this node needs, applied to both
 # /etc/default/grub (GRUB_CMDLINE_LINUX) and /etc/kernel/cmdline so the
 # value survives a BLS migration or the next kernel upgrade.

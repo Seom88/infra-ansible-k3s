@@ -9,7 +9,9 @@ galaxy_info:
     "Server" installer option provides it), installs the cockpit-machines
     plugin, optionally activates libvirt so the Machines page can create a VM,
     and owns its firewall rule opening port 9090 (cockpit service in its
-    zone; the common firewall stays in base).
+    zone; the common firewall stays in base). On a node reached through
+    Tailscale it also publishes the console in the tailnet with
+    `tailscale serve`, which the package assertion above gates.
   license: MIT
   min_ansible_version: "2.19"
   platforms:

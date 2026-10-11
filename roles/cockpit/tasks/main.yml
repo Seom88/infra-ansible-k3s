@@ -102,6 +102,165 @@
   # runs; skip only when firewall management is disabled altogether.
   when: cockpit_role_enabled | bool and base_firewall_enabled | default(true) | bool
 
+# The console tunnel belongs to this role and not to plays/virtualization.yml:
+# the play only lists roles, and this block already sits behind the
+# `cockpit` package assertion above, so it can only run on a node that really
+# has Cockpit.
+- name: Publish the Cockpit console inside the tailnet
+  when: cockpit_role_enabled | bool and cockpit_tailscale_serve_enabled | bool
+  vars:
+    # Parsed once here so both the TLS guard and the final report read the
+    # same daemon snapshot instead of re-parsing the register twice.
+    cockpit_tailscale_state: "{{ cockpit_tailscale_status.stdout | from_json }}"
+
+    # Canonicalised form of the target this role wants published: scheme plus
+    # authority, lowercase, with localhost folded into 127.0.0.1 so the check
+    # does not flap on how the daemon echoes the address back.
+    cockpit_serve_desired: >-
+      {{ cockpit_tailscale_serve_target
+         | regex_replace('^(?P<scheme>[A-Za-z+]+)://(?P<authority>[^/]+).*$',
+                         '\g<scheme>://\g<authority>')
+         | lower
+         | replace('localhost', '127.0.0.1') }}
+
+    # Every proxy target the node publishes right now, in the same canonical
+    # form. Reads the background mapping plus any foreground session, because
+    # either one can occupy the listener. Parsed with plain Jinja rather than
+    # `json_query`: the mapping is a dict keyed by host and then by mount
+    # point, and a nested wildcard projection over two levels of object keys
+    # resolves to nothing in jmespath.
+    cockpit_serve_published: >-
+      {%- set raw = cockpit_serve_status.stdout | default('', true) | trim -%}
+      {%- set config = (raw | from_json) if raw | length > 0 else {} -%}
+      {%- set proxies = [] -%}
+      {%- for listener in config.get('Web', {}).values() -%}
+      {%-   for handler in listener.get('Handlers', {}).values() -%}
+      {%-     if handler.get('Proxy', '') -%}
+      {%-       set _ = proxies.append(handler['Proxy']) -%}
+      {%-     endif -%}
+      {%-   endfor -%}
+      {%- endfor -%}
+      {%- for session in config.get('Foreground', {}).values() -%}
+      {%-   for listener in session.get('Web', {}).values() -%}
+      {%-     for handler in listener.get('Handlers', {}).values() -%}
+      {%-       if handler.get('Proxy', '') -%}
+      {%-         set _ = proxies.append(handler['Proxy']) -%}
+      {%-       endif -%}
+      {%-     endfor -%}
+      {%-   endfor -%}
+      {%- endfor -%}
+      {{ proxies
+         | map('regex_replace', '^(?P<scheme>[A-Za-z+]+)://(?P<authority>[^/]+).*$',
+                '\g<scheme>://\g<authority>')
+         | map('lower')
+         | map('replace', 'localhost', '127.0.0.1')
+         | list }}
+  block:
+
+    - name: Look for the Tailscale CLI on this node
+      ansible.builtin.stat:
+        path: "{{ cockpit_tailscale_binary }}"
+      register: cockpit_tailscale_binary_probe
+
+    - name: Refuse to publish the console without the Tailscale CLI
+      ansible.builtin.assert:
+        that:
+          - cockpit_tailscale_binary_probe.stat.exists
+        fail_msg: >-
+          {{ cockpit_tailscale_binary }} does not exist on this host, so the Cockpit
+          console cannot be published in the tailnet. This role does not install
+          Tailscale; install it or set cockpit_tailscale_serve_enabled: false.
+
+    - name: Read the Tailscale daemon state
+      ansible.builtin.command:
+        argv:
+          - "{{ cockpit_tailscale_binary }}"
+          - status
+          - --json
+      register: cockpit_tailscale_status
+      changed_when: false
+      check_mode: false
+
+    # `tailscale serve` opens an interactive web-consent flow when the tailnet
+    # cannot terminate TLS, which would hang the playbook instead of failing it.
+    - name: Refuse to publish a console the daemon cannot wrap in TLS
+      ansible.builtin.assert:
+        that:
+          - cockpit_tailscale_state.BackendState == "Running"
+          - cockpit_tailscale_state.CertDomains | length > 0
+        fail_msg: >-
+          Tailscale reports BackendState
+          {{ cockpit_tailscale_state.BackendState | default('unreadable') }}
+          and CertDomains {{ cockpit_tailscale_state.CertDomains | default([]) }}, so
+          this node cannot terminate HTTPS for {{ cockpit_tailscale_serve_target }}.
+          Enable HTTPS certificates for this tailnet in the Tailscale admin
+          console, run 'tailscale up' on this host, and re-run the playbook.
+
+    - name: Read the serve mapping this node already publishes
+      ansible.builtin.command:
+        argv:
+          - "{{ cockpit_tailscale_binary }}"
+          - serve
+          - status
+          - --json
+      register: cockpit_serve_status
+      changed_when: false
+      check_mode: false
+
+    - name: Publish the console through Tailscale Serve
+      ansible.builtin.command:
+        argv:
+          - "{{ cockpit_tailscale_binary }}"
+          - serve
+          - --bg
+          - --yes
+          - "{{ cockpit_tailscale_serve_target }}"
+      changed_when: true
+      when: cockpit_serve_desired not in cockpit_serve_published
+
+    - name: Re-read the serve mapping after publishing the console
+      ansible.builtin.command:
+        argv:
+          - "{{ cockpit_tailscale_binary }}"
+          - serve
+          - status
+          - --json
+      register: cockpit_serve_status_after
+      changed_when: false
+      check_mode: false
+
+    # `tailscale serve` exits 0 as soon as the mapping is written; this proves
+    # the mapping really landed instead of trusting that exit code.
+    - name: Refuse to report success while the console is not published
+      ansible.builtin.assert:
+        that:
+          - >-
+            cockpit_serve_status_after.stdout | default('', true)
+            is search(cockpit_serve_authority_regex)
+        fail_msg: >-
+          `tailscale serve status --json` does not report a handler proxying to
+          {{ cockpit_tailscale_serve_target | regex_replace('^.*://([^/]+).*$', '\1') }}
+          after the serve command returned 0. Inspect the node with
+          'tailscale serve status' before trusting this tunnel.
+        quiet: true
+      vars:
+        # The daemon echoes back whichever loopback spelling it was handed, so
+        # the proof has to accept both. Derived from the canonical target, where
+        # localhost is already folded into 127.0.0.1, instead of re-parsing the
+        # configured target a second time.
+        cockpit_serve_port: >-
+          {{ cockpit_serve_desired | regex_replace('^.*://127\.0\.0\.1:', '') }}
+        cockpit_serve_authority_regex: >-
+          (localhost|127\.0\.0\.1):{{ cockpit_serve_port }}
+
+    - name: Report the tailnet URL of the console
+      ansible.builtin.debug:
+        msg: >-
+          Cockpit is published at
+          https://{{ (cockpit_tailscale_state.CertDomains | first) | default('unknown') }}
+          inside the tailnet. Revert with 'tailscale serve off' or set
+          cockpit_tailscale_serve_enabled: false.
+
 - name: Manage the libvirt storage pool for Cockpit Machines
   when: cockpit_role_enabled | bool and cockpit_libvirt_pool_enabled | bool
   block:

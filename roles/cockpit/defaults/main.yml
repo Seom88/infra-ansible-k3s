@@ -40,6 +40,15 @@ cockpit_url_host: "{{ ansible_facts['hostname'] }}"
 # Same zone base guarantees firewalld on; base runs before virtualization.
 cockpit_firewall_zone: "{{ base_firewall_zone | default('public') }}"
 
+# Tailscale Serve tunnel for the console. `https+insecure` is the
+# pseudo-protocol the Tailscale docs prescribe for an HTTPS backend holding a
+# self-signed certificate: tailscaled terminates TLS with a tailnet-issued
+# certificate and skips certificate verification on the hop to 9090. The
+# mapping is stored in tailscaled state, so it survives reboots.
+cockpit_tailscale_serve_enabled: true
+cockpit_tailscale_binary: /usr/bin/tailscale
+cockpit_tailscale_serve_target: "https+insecure://localhost:9090"
+
 cockpit_install_libvirt: true
 libvirt_packages:  # noqa: var-naming[no-role-prefix]
   - libvirt
