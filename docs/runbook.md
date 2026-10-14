@@ -157,3 +157,29 @@ node at a time.
 - Re-run `site.yml` after any hand-edit on a node: **the playbook is the source of
   truth**, hand-edits are drift.
 - `ansible-lint` + `ansible-playbook site.yml --syntax-check` before every commit.
+
+### USB passthrough into a TrueNAS VM dropped (`device undefined bus undefined`)
+
+Symptoms from the host (e.g. `Aleph`) and VM:
+
+- the Realtek RTL9201R bridge (`0bda:9201`) is under `usbfs` and QEMU
+  pins `/dev/bus/usb/<bus>/<addr>`; after a reset the kernel number changes;
+- TrueNAS ZFS pool turns `DEGRADED`/`FAULTED`, drives come back as
+  `device undefined bus undefined`.
+
+Apply:
+
+1. Use managed hostdev in the VM XML (vendor/product instead of a raw
+   `/dev/bus/usb/...` path), so libvirt redetects the bridge after reset.
+2. Disable the aggressive autosuspend with `roles/usb_autosuspend`:
+   ```bash
+   ansible-playbook plays/virtualization.yml --tags usb_autosuspend
+   ```
+   or wire it in `roles:` on hypervisors and rerun `site.yml`.
+3. Move the enclosures to a real USB 3 port (5000M+) and give them dedicated
+   power — a shared low-current bus is the most common root cause.
+4. If UAS still resets, force Bulk-Only Transport inside the VM and on the host:
+   `options usb-storage quirks=0bda:9201:u`.
+
+The existing `usbcore.quirks=0bda:9201:k` cmdline entry only disables Link
+Power Management (`k`); it does not address UAS or autosuspend.

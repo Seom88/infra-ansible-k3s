@@ -1,0 +1,3 @@
+# Avoid USB-attached SCSI on Realtek RTL9201R bridges: it is unstable with
+# long-lived TrueNAS passthrough. Force Bulk-Only Transport (BOT).
+options usb-storage quirks={% for vid_pid in usb_autosuspend_vendors %}{{ vid_pid }}:u{% if not loop.last %},{% endif %}{% endfor %}

@@ -161,3 +161,19 @@ Key values (justification in [`architecture.md`](architecture.md)):
   pinned `helm-diff`, `systemctl is-active` probes, and `creates`/`removes` guards.
 - **No secrets in git:** no tokens, no kubeconfigs — k3s generates credentials and the
   role only reads the root kubeconfig in place (`0600`).
+
+## `usb_autosuspend`
+
+**Purpose:** make Realtek RTL9201R USB mass-storage bridges stable on host
+hypervisors that USB-pass them through to TrueNAS.
+
+| | |
+| --- | --- |
+| **Runs on** | hypervisors (`virtualization` play, optional) |
+| **Switch** | `usb_autosuspend_enabled` (default **true**) |
+| **What it installs** | `/etc/udev/rules.d/51-usb-autosuspend.rules` (`power/control=on`, `power/autosuspend_delay_ms=-1`) and `/etc/modprobe.d/50-usb-rtl9201.conf` (`usb-storage quirks=...:u`) |
+| **Intent** | keep the bridges powered at idle and avoid UAS-related resets that break the QEMU `usb-host` path mapping (`device undefined bus undefined`) |
+| **Apply at runtime** | reboot or `udevadm trigger --subsystem-match=usb`; the modprobe drop-in takes effect on the next `usb-storage` module load |
+
+The role does not remove the host's `usbcore.quirks` entry for `0bda:9201:k`,
+which only disables Link Power Management. Keep it; the two settings are complementary.

@@ -1,0 +1,23 @@
+galaxy_info:
+  role_name: usb_autosuspend
+  namespace: infra_k3s
+  author: infra-k3s
+  description: >-
+    Keeps Realtek RTL9201R USB storage stable by disabling autosuspend and
+    selecting Bulk-Only Transport instead of UAS. Useful for host-side USB
+    passthrough to TrueNAS VM.
+  license: MIT
+  min_ansible_version: "2.19"
+  platforms:
+    - name: EL
+      versions:
+        - "9"
+        - "10"
+  galaxy_tags:
+    - usb
+    - almalinux
+    - truenas
+    - udev
+    - kvm
+
+dependencies: []

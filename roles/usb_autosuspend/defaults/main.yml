@@ -1,0 +1,22 @@
+# Keep the uas (USB-attached SCSI) transport disabled for the Realtek RTL9201R
+# bridges. That chip is stable as bulk-only transport (BOT), and UAS on it
+# produces reset storms that drop TrueNAS passthrough.
+usb_autosuspend_enabled: true
+
+# Vendor:product pairs of the USB bridges to make power-stable.
+usb_autosuspend_vendors:
+  - "0bda:9201"
+
+# Individual device smoothing for the kernel's autosuspend behaviour.
+usb_autosuspend_power_control: "on"
+usb_autosuspend_delay_ms: "-1"
+
+# Default UAS quirks issued through modprobe; note kernel-built-in (non-module)
+# kernels still need the same value through /etc/modprobe.d or cmdline.
+usb_autosuspend_disable_uas: true
+usb_autosuspend_modprobe_file: "/etc/modprobe.d/50-usb-rtl9201.conf"
+
+# Stable host-side identifier for udev.
+usb_autosuspend_udev_rules_file: "/etc/udev/rules.d/51-usb-autosuspend.rules"
+usb_autosuspend_udev_rules_reload: true
+usb_autosuspend_udev_rules_trigger: "usb"

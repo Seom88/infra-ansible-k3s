@@ -1,0 +1,7 @@
+# Keep these RTL9201R USB bridges powered and stable because their
+# autosuspend events trigger resets that cut TrueNAS passthrough.
+{% for vid_pid in usb_autosuspend_vendors %}
+{% set vid = vid_pid.split(':')[0] %}
+{% set pid = vid_pid.split(':')[1] %}
+SUBSYSTEM=="usb", ATTR{idVendor}=="{{ vid }}", ATTR{idProduct}=="{{ pid }}", ATTR{power/control}="{{ usb_autosuspend_power_control }}", ATTR{power/autosuspend_delay_ms}="{{ usb_autosuspend_delay_ms }}"
+{% endfor %}

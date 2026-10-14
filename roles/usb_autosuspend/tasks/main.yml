@@ -1,0 +1,41 @@
+---
+# udev rule that keeps USB attached Realtek RTL9201R devices on and
+# exempt from aggressive autosuspend (which otherwise cut TrueNAS passthrough
+# links when idle).
+- name: Render USB autosuspend udev rule
+  ansible.builtin.template:
+    src: udev.rules.j2
+    dest: "{{ usb_autosuspend_udev_rules_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+  when: usb_autosuspend_enabled | bool
+
+# Disable UAS for the RTL9201R bridges so they stay on bulk-only transport.
+- name: Render modprobe drop-in for RTL9201R UAS quirk
+  ansible.builtin.template:
+    src: modprobe.conf.j2
+    dest: "{{ usb_autosuspend_modprobe_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+  when: usb_autosuspend_enabled | bool and usb_autosuspend_disable_uas | bool
+
+# udev drop-in must be refreshed before any later device events.
+- name: Reload udev rules
+  ansible.builtin.command: udevadm control --reload-rules
+  changed_when: false
+  when:
+    - usb_autosuspend_enabled | bool
+    - usb_autosuspend_udev_rules_reload | bool
+  run_once: false
+
+# A live trigger does not always catch devices already under host control, but
+# at least gets the steady state consistent on next enumeration.
+- name: Trigger udev rules for present USB subsystem
+  ansible.builtin.command: udevadm trigger --subsystem-match={{ usb_autosuspend_udev_rules_trigger }}
+  changed_when: true
+  failed_when: false
+  when:
+    - usb_autosuspend_enabled | bool
+    - usb_autosuspend_udev_rules_trigger is not none
