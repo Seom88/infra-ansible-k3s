@@ -32,7 +32,13 @@ only, no k3s payload.
 | **Installs** | `curl`, `tar`, `git`, `chrony` (time sync) |
 | **Verifies** | cgroup v2 marker `/sys/fs/cgroup/cgroup.controllers`; records SELinux status as a fact for later roles |
 | **Common firewall** | ensures the firewall daemon (`firewalld` service) is running; opens `41641/udp` (Tailscale) in `base_firewall_zone` (`public`); trusts `tailscale0` by interface; masquerade on; validates with `firewall-cmd --check-config` before reload |
+| **Tailscale subnet router** | advertises `base_tailscale_advertise_routes` (`192.168.2.0/24`) with `tailscale set --advertise-routes`; reads the existing pref from `tailscale debug prefs` for an honest change signal; writes `net.ipv4.ip_forward=1` to `/etc/sysctl.d/99-tailscale.conf` (`kernel_modules` carries the same key in its own `99-k3s.conf`); asserts the daemon is `Running` first |
 | **Switch** | `base_firewall_enabled` — other roles skip their own rules when it is false |
+
+Advertising a route only *publishes* it: it carries traffic after it is
+approved in the Tailscale admin console (or allowed by an `autoApprovers`
+tailnet policy rule). The role never touches the tailnet policy file and says
+so in its closing report.
 
 Helm, `helm-diff`, `kernel-modules-extra` and `socat` used to live here and
 were moved to `k3s_prereqs`: a docker-only or hypervisor-only node must not
@@ -85,6 +91,22 @@ No forced reboots: the playbook reports and stops short of pretending the node i
 | **Firewall** | owns its rule: opens `9090` only after the probe succeeds (`service: cockpit` zone rule in `cockpit_firewall_zone`, defaulting to `base_firewall_zone`); skipped when `base_firewall_enabled` is false — base runs first and guarantees the daemon |
 | **libvirt** | when `cockpit_install_libvirt: true`: installs `cockpit-machines`, `libvirt`, `qemu-kvm`, `virt-install`; probes both monolithic (`libvirtd`) and modular (`virtqemud`, `virtstoraged`, `virtnetworkd`, `virtnodedevd`, …) socket units and **asserts the required modular sockets are listening** |
 | **Storage pool** | `default` pool at `/home/libvirt/images`, `autostart: true`; SELinux fcontext **`virt_image_t`** + `restorecon`; idempotent `virsh define/build/start/autostart` (raw `virsh`, not `community.libvirt`) |
+| **Tailscale Serve** | after the firewall rule, publishes the console with `tailscale serve --bg --yes https+insecure://localhost:9090`; the whole block sits behind the package assertion above, so it can only run where Cockpit really is |
+
+Why `https+insecure://`: Cockpit serves HTTPS on 9090 with a **self-signed**
+certificate. `tailscale serve` terminates TLS with a tailnet-issued
+certificate, and the `https+insecure` pseudo-protocol tailscale then skips
+verification on the hop to the backend. A plain port would talk HTTP to a TLS
+listener, and plain `https://` would fail the certificate check.
+
+The mapping lives in tailscaled state, so it survives reboots and daemon
+restarts without a unit file. Idempotency compares the target the node already
+publishes (read from `tailscale serve status --json`, scheme + authority,
+`localhost` folded into `127.0.0.1`) against the wanted one, and a closing
+`assert` proves the mapping landed instead of trusting the exit code. Two
+guards run first, both fail-loud: the daemon must report `Running`, and
+`CertDomains` must be non-empty — otherwise `tailscale serve` opens an
+interactive web-consent flow that would hang the playbook.
 
 ## `cilium`
 

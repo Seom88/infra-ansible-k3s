@@ -12,6 +12,21 @@ k8sServicePort: 6443
 
 kubeProxyReplacement: true
 
+# Datapath devices.
+# Tailscale runs on this node (host tailscaled), so Cilium's probing sees
+# tailscale0 (it has non-local tailnet routes) and attaches its datapath to it.
+# tailscale0 sits at MTU 1280, so Cilium clamps EVERY pod veth and the vxlan
+# tunnel to 1280. That is smaller than what the tailnet path needs (~1360 =
+# tailscale0 1280 + WireGuard overhead), so proxy packets are dropped and TCP
+# retransmits -- the ~450ms TLS handshake on every tailscale Ingress.
+# Pinning MTU alone does NOT help: Cilium clamps it back down to the datapath
+# device MTU (verified: mtu=1500 in the configmap, cilium_vxlan still 1280).
+# Restrict the datapath to the real uplink instead. bridge0 is the top-level
+# device carrying the default route (192.168.2.1, src 192.168.2.201) and
+# k8sServiceHost; eno1 is enslaved to it and has no address of its own.
+# Refs: cilium#34314, tailscale#12393, tailscale#18565
+devices: "bridge0"
+
 socketLB:
   enabled: true
   hostNamespaceOnly: true

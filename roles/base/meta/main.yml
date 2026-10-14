@@ -4,9 +4,10 @@ galaxy_info:
   author: infra-k3s
   description: >-
     Base OS layer for an AlmaLinux managed node: distribution guard rail,
-    generic packages (curl, tar, git), time synchronisation, host facts and
-    the common host firewall (daemon running, Tailscale port/interface,
-    masquerade). No k3s payload — that lives in k3s_prereqs.
+    generic packages (curl, tar, git), time synchronisation, host facts, the
+    common host firewall (daemon running, Tailscale port/interface,
+    masquerade) and the Tailscale subnet router that advertises the node LAN
+    into the tailnet. No k3s payload — that lives in k3s_prereqs.
   license: MIT
   min_ansible_version: "2.19"
   platforms:
