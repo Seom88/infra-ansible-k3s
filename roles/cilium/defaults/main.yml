@@ -1,7 +1,7 @@
 cilium_chart_repo_name: cilium
 cilium_chart_repo_url: https://helm.cilium.io/
 cilium_chart_name: cilium
-cilium_chart_version: "1.20.2"
+cilium_chart_version: "1.20.3"
 
 cilium_release_name: cilium
 
