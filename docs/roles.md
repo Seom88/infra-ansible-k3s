@@ -199,3 +199,24 @@ hypervisors that USB-pass them through to TrueNAS.
 
 The role does not remove the host's `usbcore.quirks` entry for `0bda:9201:k`,
 which only disables Link Power Management. Keep it; the two settings are complementary.
+
+## `scheduled_shutdown`
+
+**Purpose:** stop paying for an idle hypervisor overnight — the power-off half
+of the daily cycle.
+
+| | |
+| --- | --- |
+| **Runs on** | `server` (`plays/power.yml`), deliberately not `managed_nodes`, so a standby or docker-only node never inherits the schedule |
+| **Switch** | `scheduled_shutdown_enabled` (default **true**); `false` stops, disables **and removes** both units |
+| **Installs** | `/etc/systemd/system/scheduled-shutdown.service` + `.timer` (`0644`) |
+| **Calendar** | `scheduled_shutdown_calendar` — `*-*-* 22:00:00 America/Bogota`; the zone suffix is explicit, so the host clock zone is irrelevant |
+| **Validates** | `systemd-analyze calendar` runs **before** any unit is written: a malformed expression or an unknown zone fails the play instead of arming a wrong timer |
+| **Power-off** | `Type=oneshot` → `/usr/sbin/shutdown -h now "<wall message>"`; graceful, so k3s and libvirt get their stop timeout |
+| **`Persistent=false`** | a missed window is never replayed — `Persistent=true` would power the node off right after a cold start |
+
+Power-on is out of band (BIOS RTC wake) and the role never touches it. Nothing
+drains the node first: a single-node cluster has nowhere to drain to, so
+workloads stop with the node and recover on the next boot. A changed calendar
+restarts the timer through a handler, so the new expression is armed right away
+instead of waiting for the next reload.

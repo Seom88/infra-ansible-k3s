@@ -6,3 +6,6 @@
 
 - name: Prepare virtualization consoles
   ansible.builtin.import_playbook: plays/virtualization.yml
+
+- name: Schedule the nightly power-off
+  ansible.builtin.import_playbook: plays/power.yml

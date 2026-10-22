@@ -1,0 +1,14 @@
+[Unit]
+Description=Nightly power-off timer ({{ scheduled_shutdown_calendar }})
+
+[Timer]
+OnCalendar={{ scheduled_shutdown_calendar }}
+# Never fire a missed window after boot: if the node was already off at the
+# scheduled time there is nothing to shut down, and Persistent=true would
+# power it off right after a cold start.
+Persistent=false
+AccuracySec=1s
+Unit={{ scheduled_shutdown_service_name }}
+
+[Install]
+WantedBy=timers.target

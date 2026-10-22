@@ -1,0 +1,8 @@
+---
+- name: Schedule the nightly power-off on the cluster server
+  hosts: server
+  become: true
+  gather_facts: false
+
+  roles:
+    - role: scheduled_shutdown

@@ -1,0 +1,87 @@
+---
+# The node comes back on its own (BIOS RTC wake), so the role only schedules the
+# shutdown. Order matters: units are rendered, systemd is reloaded, and only
+# then the timer is enabled, because a unit file that systemd has not read yet
+# cannot be started by name.
+- name: Require a systemd calendar expression
+  ansible.builtin.assert:
+    that:
+      - scheduled_shutdown_calendar | trim | length > 0
+    fail_msg: >-
+      scheduled_shutdown_calendar is empty. Set a systemd calendar expression
+      such as "*-*-* 22:00:00 America/Bogota" in
+      roles/scheduled_shutdown/defaults/main.yml or in inventory group_vars.
+    quiet: true
+  # Disabling must still be able to run with the schedule cleared, otherwise the
+  # already-armed timer would be left behind and still fire.
+  when: scheduled_shutdown_enabled | bool
+
+# Fail before writing anything if the expression is malformed or the timezone
+# does not exist; systemd-analyze exits non-zero and prints the parse error.
+- name: Reject a calendar expression systemd cannot parse
+  ansible.builtin.command:
+    argv:
+      - systemd-analyze
+      - calendar
+      - "{{ scheduled_shutdown_calendar }}"
+  register: scheduled_shutdown_calendar_check
+  changed_when: false
+  check_mode: false
+  when: scheduled_shutdown_enabled | bool
+
+- name: Render the power-off service unit
+  ansible.builtin.template:
+    src: scheduled-shutdown.service.j2
+    dest: "{{ scheduled_shutdown_unit_dir }}/{{ scheduled_shutdown_service_name }}"
+    owner: root
+    group: root
+    mode: "0644"
+  when: scheduled_shutdown_enabled | bool
+  notify: Reload systemd and arm the power-off timer
+
+- name: Render the power-off timer unit
+  ansible.builtin.template:
+    src: scheduled-shutdown.timer.j2
+    dest: "{{ scheduled_shutdown_unit_dir }}/{{ scheduled_shutdown_timer_name }}"
+    owner: root
+    group: root
+    mode: "0644"
+  when: scheduled_shutdown_enabled | bool
+  notify: Reload systemd and arm the power-off timer
+
+# Flush so the reload happens before the enable task looks the timer up.
+- name: Reload systemd before enabling the timer
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable and start the power-off timer
+  ansible.builtin.systemd_service:
+    name: "{{ scheduled_shutdown_timer_name }}"
+    enabled: true
+    state: started
+  when: scheduled_shutdown_enabled | bool
+
+# Disabling must actually remove the schedule; leaving an active timer behind
+# because the switch flipped would power the node off anyway.
+- name: Check whether the power-off units are installed
+  ansible.builtin.stat:
+    path: "{{ scheduled_shutdown_unit_dir }}/{{ scheduled_shutdown_timer_name }}"
+  register: scheduled_shutdown_timer_file
+
+- name: Stop and disable the power-off timer
+  ansible.builtin.systemd_service:
+    name: "{{ scheduled_shutdown_timer_name }}"
+    enabled: false
+    state: stopped
+  when:
+    - not scheduled_shutdown_enabled | bool
+    - scheduled_shutdown_timer_file.stat.exists
+
+- name: Remove the power-off units
+  ansible.builtin.file:
+    path: "{{ scheduled_shutdown_unit_dir }}/{{ item }}"
+    state: absent
+  loop:
+    - "{{ scheduled_shutdown_service_name }}"
+    - "{{ scheduled_shutdown_timer_name }}"
+  when: not scheduled_shutdown_enabled | bool
+  notify: Reload systemd

@@ -1,0 +1,7 @@
+[Unit]
+Description=Scheduled power-off ({{ scheduled_shutdown_calendar }})
+Documentation=man:systemd.timer(5)
+
+[Service]
+Type=oneshot
+ExecStart={{ scheduled_shutdown_poweroff_binary }} -h now "{{ scheduled_shutdown_message }}"

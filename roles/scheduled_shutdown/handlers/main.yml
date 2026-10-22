@@ -1,0 +1,12 @@
+---
+# A changed calendar only takes effect once the timer is re-armed; the running
+# timer keeps the next-elapse it computed when it was started.
+- name: Reload systemd and arm the power-off timer
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+    name: "{{ scheduled_shutdown_timer_name }}"
+    state: restarted
+
+- name: Reload systemd
+  ansible.builtin.systemd_service:
+    daemon_reload: true

@@ -68,8 +68,8 @@ the Helm release itself is GitOps-managed).
 ## What's inside
 
 ```
-site.yml                  # 3 imports: base → k3s → virtualization (plays live in plays/)
-plays/                    # one play per function: base.yml, k3s.yml, virtualization.yml
+site.yml                  # 4 imports: base → k3s → virtualization → power (plays live in plays/)
+plays/                    # one play per function: base.yml, k3s.yml, virtualization.yml, power.yml
 inventory/hosts.yml       # server/agent groups, hypervisors, Tailscale-backed ansible_host
 inventory/group_vars/     # every tunable: k3s version, CIDRs, data paths, firewall switch
 values/                   # single source of truth for both Helm charts
@@ -83,6 +83,7 @@ roles/
   cilium/                 # Gateway API CRDs → Cilium chart → accept_local fix
   longhorn_prereqs/       # iscsi/dm_crypt modules, filesystem assert, fail-loud checks
   argocd/                 # Argo CD chart, Lua health checks, CiliumNetworkPolicies
+  scheduled_shutdown/     # nightly power-off timer (22:00 America/Bogota); power-on stays in BIOS
 ```
 
 Firewall is per-role on purpose: `base` owns only the common rules (daemon,
@@ -115,6 +116,8 @@ ansible-playbook site.yml --check --diff                 # see what would change
 Idempotency is a feature, not an accident — the second run should report almost nothing
 changed. The playbook reboots nothing by itself; when kernel modules are missing for the
 running kernel, roles **report** `reboot required` and stop short of silently continuing.
+The one scheduled stop is `roles/scheduled_shutdown`: `site.yml` arms a nightly
+22:00 `America/Bogota` power-off, and the node is brought back out of band from BIOS.
 
 ## Design decisions
 

@@ -1,0 +1,19 @@
+---
+# Nightly graceful power-off for a node that is powered back on out of band
+# (BIOS RTC wake). This role owns only the shutdown half of the cycle.
+scheduled_shutdown_enabled: true
+
+# systemd calendar expression. The timezone suffix is explicit on purpose: the
+# host clock keeps whatever zone it was installed with, while the schedule is
+# expressed in the operator's zone (Colombia, UTC-5, no DST).
+scheduled_shutdown_calendar: "*-*-* 22:00:00 America/Bogota"
+
+# Wall message shown to logged-in sessions when the power-off starts.
+scheduled_shutdown_message: "Scheduled power-off: 22:00 America/Bogota."
+
+scheduled_shutdown_unit_dir: /etc/systemd/system
+scheduled_shutdown_service_name: scheduled-shutdown.service
+scheduled_shutdown_timer_name: scheduled-shutdown.timer
+
+# Absolute path on purpose: Type=oneshot units get a minimal PATH.
+scheduled_shutdown_poweroff_binary: /usr/sbin/shutdown

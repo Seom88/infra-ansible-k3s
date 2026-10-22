@@ -1,0 +1,21 @@
+galaxy_info:
+  role_name: scheduled_shutdown
+  namespace: infra_k3s
+  author: infra-k3s
+  description: >-
+    Powers a node off on a systemd calendar (default 22:00 America/Bogota) so
+    the host does not idle overnight. Power-on stays out of band in BIOS.
+  license: MIT
+  min_ansible_version: "2.19"
+  platforms:
+    - name: EL
+      versions:
+        - "9"
+        - "10"
+  galaxy_tags:
+    - systemd
+    - power
+    - timer
+    - almalinux
+
+dependencies: []

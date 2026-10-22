@@ -24,10 +24,13 @@ What to expect, in order:
    for the running kernel.
 5. Argo CD — installs last, `wait` up to 900 s.
 6. Virtualization play (`cockpit` on hypervisors, own `9090` rule).
+7. Power play (`scheduled_shutdown` on the server) — arms the nightly 22:00
+   `America/Bogota` power-off; see [Nightly power-off](#nightly-power-off).
 
 > **Reboot contract:** nothing reboots itself. If a role reports `reboot required`,
 > reboot the node (or use `ansible.builtin.reboot`) and re-run the playbook — the
-> second run must report `ok`, not `changed`.
+> second run must report `ok`, not `changed`. The one scheduled stop is the nightly
+> power-off, documented under [Nightly power-off](#nightly-power-off).
 
 ## Re-runs and idempotency
 
@@ -150,6 +153,34 @@ node at a time.
 2. Run `ansible-playbook site.yml` — the base play baselines it and the k3s
    play covers prereqs, agent join, and Longhorn prerequisites automatically.
 3. Verify: `kubectl get nodes` shows the new node `Ready`.
+
+## Nightly power-off
+
+`roles/scheduled_shutdown` owns one systemd timer on the cluster server
+(`plays/power.yml`, `hosts: server`). Power-on is out of band — BIOS RTC wake — so
+nothing in the repo brings the node back.
+
+```bash
+# what is armed, and when it fires next
+systemctl list-timers scheduled-shutdown.timer
+systemd-analyze calendar "*-*-* 22:00:00 America/Bogota"
+
+# cancel tonight without touching the repo
+sudo systemctl stop scheduled-shutdown.timer
+
+# re-arm with the configured calendar
+ansible-playbook plays/power.yml
+
+# inspect the units and the wall message
+systemctl cat scheduled-shutdown.timer scheduled-shutdown.service
+```
+
+`Persistent=false` on purpose: a window missed while the node was off is not
+replayed at boot. Setting `scheduled_shutdown_enabled: false` stops, disables and
+**removes** both units — a flipped switch must not leave a live timer behind.
+
+The stop is graceful (`shutdown -h now`), so k3s gets its stop timeout instead of
+a hard reset; Longhorn volumes reattach and pods restart after the next boot.
 
 ## Nightly hygiene
 
