@@ -6,10 +6,10 @@ scheduled_shutdown_enabled: true
 # systemd calendar expression. The timezone suffix is explicit on purpose: the
 # host clock keeps whatever zone it was installed with, while the schedule is
 # expressed in the operator's zone (Colombia, UTC-5, no DST).
-scheduled_shutdown_calendar: "*-*-* 22:00:00 America/Bogota"
+scheduled_shutdown_calendar: "*-*-* 20:00:00 America/Bogota"
 
 # Wall message shown to logged-in sessions when the power-off starts.
-scheduled_shutdown_message: "Scheduled power-off: 22:00 America/Bogota."
+scheduled_shutdown_message: "Scheduled power-off: 20:00 America/Bogota."
 
 scheduled_shutdown_unit_dir: /etc/systemd/system
 scheduled_shutdown_service_name: scheduled-shutdown.service
