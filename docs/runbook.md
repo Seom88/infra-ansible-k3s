@@ -185,12 +185,62 @@ a hard reset; Longhorn volumes reattach and pods restart after the next boot.
 ## ZFS on the host (NAS group)
 
 `plays/nas.yml` runs the `zfs` role on hosts in the `nas` group. Add the host,
-then fill `inventory/group_vars/nas/main.yml` with `/dev/disk/by-id/` devices:
+then configure existing pools to import, or new pools to create, using
+`/dev/disk/by-id/` devices. These are distinct operations: importing preserves
+the pool; `zfs_pools` invokes `zpool create` and must only be used for blank/new
+disks.
 
 ```bash
 ansible-playbook plays/nas.yml --check --diff   # see the plan first
 ansible-playbook plays/nas.yml
 ```
+
+Aleph's existing `Data` mirror is configured under `zfs_import_pools` in
+`inventory/group_vars/nas/main.yml`, with both member partition paths. The role
+checks those stable paths and imports only the named pool (with `-f`, because it
+was last accessed by the TrueNAS VM); it does not create or format the disks.
+Inspect the pool and its datasets after import before adding any dataset or
+mountpoint declarations.
+
+For Aleph, the pool uses native ZFS encryption (`aes-256-gcm`, `keyformat=hex`).
+Keep the exported `Data` key as the `zfs_dataset_key` variable in the locally
+ignored `inventory/group_vars/nas/vault.yml` file, encrypted with Vault. The role
+writes it to `/root/.config/zfs/Data.key` (`root:root`, mode `0600`) without
+logging its contents, then installs a systemd unit that loads the key after pool
+import and before ZFS mounts datasets. Run with the Vault password prompt:
+
+```bash
+ansible-playbook plays/nas.yml --ask-vault-pass
+```
+
+The Vault file is ignored by Git in this repository; keep a secure backup of
+both it and the original TrueNAS key export. The pool key is necessarily present
+in plaintext on Aleph for unattended unlock, so root access to Aleph grants
+access to the data.
+
+### RustFS with Podman
+
+RustFS is configured as a host service using Podman Quadlet (no Docker daemon or
+Compose provider). Add these values to the encrypted
+`inventory/group_vars/nas/vault.yml` file without displaying them:
+
+```yaml
+rustfs_ts_authkey: "<Tailscale auth key>"
+rustfs_access_key: "<RustFS access key>"
+rustfs_secret_key: "<RustFS secret key>"
+```
+
+Then set `rustfs_enabled: true` in `inventory/group_vars/nas/main.yml` and run:
+
+```bash
+ansible-playbook plays/nas.yml --ask-vault-pass
+```
+
+Quadlet shares the pod network between `rustfs-ts` and `rustfs`; only UDP
+41642 is published on the host (41641 belongs to Aleph's host Tailscale daemon),
+while the existing Serve configuration proxies to ports 9000 and 9001. Existing data at `/Data/Docker/rustfs/data` is reused,
+not erased. Podman healthchecks with systemd restart unhealthy containers,
+replacing the Compose `autoheal` sidecar.
 
 ### Enroll the signing key (manual, once)
 

@@ -1,0 +1,26 @@
+[Unit]
+Description=RustFS object storage
+Requires=rustfs-ts.service
+After=rustfs-ts.service
+
+[Container]
+ContainerName=rustfs
+Image={{ rustfs_image }}
+Pod=rustfs.pod
+EnvironmentFile={{ rustfs_secret_dir }}/rustfs.env
+Volume={{ rustfs_data_root }}/data:/data:Z
+HealthCmd=CMD-SHELL curl -f http://localhost:9000/health && curl -f http://localhost:9001/rustfs/console/health
+HealthInterval={{ rustfs_health_interval }}
+HealthTimeout={{ rustfs_health_timeout }}
+HealthRetries={{ rustfs_health_retries }}
+HealthStartPeriod={{ rustfs_health_start_period }}
+HealthOnFailure=kill
+RunInit=true
+
+[Service]
+ExecStartPre=/usr/local/libexec/rustfs/wait-for-tailscale.sh
+Restart=always
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target

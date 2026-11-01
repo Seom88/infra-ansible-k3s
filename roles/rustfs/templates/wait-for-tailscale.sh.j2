@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+container=rustfs-ts
+deadline=$((SECONDS + {{ rustfs_tailscale_health_wait_seconds }}))
+
+while (( SECONDS < deadline )); do
+    health=$(podman inspect --format '{{"{{"}}.State.Health.Status{{"}}"}}' "$container" 2>/dev/null || true)
+    if [[ "$health" == healthy ]]; then
+        exit 0
+    fi
+    sleep 5
+done
+
+echo "Tailscale sidecar did not become healthy within {{ rustfs_tailscale_health_wait_seconds }} seconds" >&2
+podman inspect --format '{{"{{"}}.State.Health.Status{{"}}"}}' "$container" >&2 || true
+exit 1

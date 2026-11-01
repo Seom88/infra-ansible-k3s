@@ -1,0 +1,16 @@
+[Unit]
+Description=Unlock and mount encrypted ZFS pool {{ zfs_key_dataset }}
+Documentation=man:zfs-load-key(8) man:zfs-mount(8)
+DefaultDependencies=no
+Requires=zfs-import.target
+After=zfs-import.target
+Before=zfs-mount.service
+ConditionPathIsDirectory=/sys/module/zfs
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart={{ zfs_script_dir }}/unlock-pool.sh
+
+[Install]
+WantedBy=zfs-mount.service

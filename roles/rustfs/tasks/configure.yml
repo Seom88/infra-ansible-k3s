@@ -1,0 +1,134 @@
+---
+- name: Require RustFS and Tailscale credentials from Ansible Vault
+  ansible.builtin.assert:
+    that:
+      - rustfs_ts_authkey is defined
+      - rustfs_ts_authkey | string | length > 0
+      - rustfs_access_key is defined
+      - rustfs_access_key | string | length > 0
+      - rustfs_secret_key is defined
+      - rustfs_secret_key | string | length > 0
+      - "'\n' not in (rustfs_ts_authkey | string) and '\r' not in (rustfs_ts_authkey | string)"
+      - "'\n' not in (rustfs_access_key | string) and '\r' not in (rustfs_access_key | string)"
+      - "'\n' not in (rustfs_secret_key | string) and '\r' not in (rustfs_secret_key | string)"
+      - "rustfs_tailscale_hostname is match('^[A-Za-z0-9][A-Za-z0-9-]{0,62}$')"
+    fail_msg: >-
+      Set rustfs_ts_authkey, rustfs_access_key and rustfs_secret_key in the
+      encrypted inventory/group_vars/nas/vault.yml before enabling RustFS.
+
+- name: Verify that the RustFS data pool is mounted as ZFS
+  ansible.builtin.command:
+    cmd: findmnt -rn -T {{ rustfs_data_root }} -o FSTYPE
+  register: rustfs_data_fstype
+  changed_when: false
+
+- name: Refuse to start RustFS without its ZFS data pool
+  ansible.builtin.assert:
+    that:
+      - rustfs_data_fstype.stdout | trim == 'zfs'
+    fail_msg: >-
+      {{ rustfs_data_root }} is not on a mounted ZFS filesystem. Refusing to
+      start RustFS so it cannot silently write into the host root filesystem.
+
+- name: Check that the existing Tailscale Serve configuration is present
+  ansible.builtin.stat:
+    path: "{{ rustfs_config_file }}"
+  register: rustfs_serve_config
+
+- name: Require the existing Tailscale Serve configuration
+  ansible.builtin.assert:
+    that:
+      - rustfs_serve_config.stat.exists
+      - rustfs_serve_config.stat.isreg
+    fail_msg: "Expected the existing Tailscale Serve config at {{ rustfs_config_file }}."
+
+- name: Install Podman
+  ansible.builtin.dnf:
+    name: podman
+    state: present
+
+- name: Open the RustFS Tailscale sidecar UDP port
+  ansible.posix.firewalld:
+    port: "{{ rustfs_tailscale_udp_port }}/udp"
+    zone: "{{ base_firewall_zone | default('public') }}"
+    permanent: true
+    immediate: true
+    state: enabled
+  when: base_firewall_enabled | default(true) | bool
+
+- name: Ensure the Tailscale state directory exists without changing ownership
+  ansible.builtin.file:
+    path: "{{ rustfs_data_root }}/ts-state"
+    state: directory
+    mode: "0700"
+
+- name: Ensure RustFS config and data directories exist without changing ownership
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ rustfs_data_root }}/config"
+    - "{{ rustfs_data_root }}/data"
+
+- name: Ensure Quadlet and secret directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "{{ rustfs_quadlet_dir }}"
+    - "{{ rustfs_secret_dir }}"
+    - /usr/local/libexec/rustfs
+
+- name: Deploy the Tailscale health wait helper
+  ansible.builtin.template:
+    src: wait-for-tailscale.sh.j2
+    dest: /usr/local/libexec/rustfs/wait-for-tailscale.sh
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install the Tailscale environment file
+  ansible.builtin.template:
+    src: tailscale.env.j2
+    dest: "{{ rustfs_secret_dir }}/rustfs-tailscale.env"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  diff: false
+
+- name: Install the RustFS environment file
+  ansible.builtin.template:
+    src: rustfs.env.j2
+    dest: "{{ rustfs_secret_dir }}/rustfs.env"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  diff: false
+
+- name: Install Podman Quadlet definitions
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "{{ rustfs_quadlet_dir }}/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - rustfs.pod
+    - rustfs-ts.container
+    - rustfs.container
+  notify: Reload systemd manager configuration
+
+- name: Reload systemd and generate Quadlet units
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable and start RustFS (Podman Quadlet)
+  ansible.builtin.systemd:
+    name: rustfs.service
+    enabled: true
+    state: started

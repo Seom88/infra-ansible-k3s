@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+POOL="{{ zfs_key_dataset }}"
+KEY_FILE="{{ zfs_key_file }}"
+
+status=$(zfs get -H -o value keystatus "$POOL")
+if [[ "$status" != "available" ]]; then
+    zfs load-key -L "file://${KEY_FILE}" "$POOL"
+fi
+
+# The import units use -N, so mounting happens only after the key is loaded.
+zfs mount -a

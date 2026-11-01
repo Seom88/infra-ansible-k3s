@@ -73,6 +73,20 @@ zfs_datasets: []
 #      compression: zstd
 #      mountpoint: /srv/backup
 
+# Pools to import by name, with -f because they were last accessed by another
+# system (for example a pool created inside a VM that has been retired).
+zfs_import_pools: []
+#  - name: Data
+#    force: true
+#    devices: [/dev/disk/by-id/...-part1, /dev/disk/by-id/...-part1]
+
+# Unlock a native-encrypted pool from a locally installed key file. Keep the
+# key itself in an Ansible Vault variable named zfs_dataset_key.
+zfs_key_enabled: false
+zfs_key_dataset: "Data"
+zfs_key_format: "hex"
+zfs_key_file: "/root/.config/zfs/{{ zfs_key_dataset }}.key"
+
 # Import every discoverable pool before creating new ones. Off by default: a
 # NAS node should import its own pools, never a stray disk left attached.
 zfs_import_all: false

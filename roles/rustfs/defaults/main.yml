@@ -1,0 +1,21 @@
+---
+rustfs_enabled: false
+
+rustfs_data_root: /Data/Docker/rustfs
+rustfs_config_file: "{{ rustfs_data_root }}/config/serve.json"
+rustfs_quadlet_dir: /etc/containers/systemd
+rustfs_secret_dir: /etc/rustfs
+
+rustfs_tailscale_image: docker.io/tailscale/tailscale:latest
+rustfs_tailscale_udp_port: 41642
+rustfs_image: docker.io/rustfs/rustfs:latest
+
+rustfs_console_enable: "true"
+rustfs_console_cors_allowed_origins: "*"
+rustfs_tailscale_hostname: rustfs
+
+rustfs_health_interval: 30s
+rustfs_health_timeout: 10s
+rustfs_health_retries: 3
+rustfs_health_start_period: 40s
+rustfs_tailscale_health_wait_seconds: 180

@@ -1,0 +1,12 @@
+[Unit]
+Description=RustFS and Tailscale Podman pod
+Requires=zfs-unlock-pool.service
+After=zfs-unlock-pool.service
+
+[Pod]
+PodName=rustfs
+HostName=rustfs
+PublishPort={{ rustfs_tailscale_udp_port }}:{{ rustfs_tailscale_udp_port }}/udp
+
+[Install]
+WantedBy=multi-user.target

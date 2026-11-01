@@ -1,0 +1,4 @@
+---
+- name: Configure RustFS with Podman Quadlet
+  ansible.builtin.import_tasks: configure.yml
+  when: rustfs_enabled | bool

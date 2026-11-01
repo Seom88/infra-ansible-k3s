@@ -3,8 +3,8 @@
   ansible.builtin.assert:
     that:
       - zfs_enabled | bool
-      - ansible_distribution in ['AlmaLinux', 'Rocky', 'RedHat', 'CentOS']
-      - ansible_distribution_major_version is version('9', '>=')
+      - ansible_facts['distribution'] in ['AlmaLinux', 'Rocky', 'RedHat', 'CentOS']
+      - ansible_facts['distribution_major_version'] is version('9', '>=')
     fail_msg: >-
       The zfs role targets EL9/EL10 hosts and only runs where zfs_enabled is
       true. Apply it through plays/nas.yml to the `nas` group.
@@ -44,7 +44,7 @@
 # even when kmod-zfs is already compiled for it.
 - name: Install kernel-devel for the running kernel
   ansible.builtin.dnf:
-    name: "kernel-devel-{{ ansible_kernel }}"
+    name: "kernel-devel-{{ ansible_facts['kernel'] }}"
     state: present
   register: zfs_kernel_devel
   failed_when: false
@@ -141,6 +141,36 @@
   ansible.builtin.set_fact:
     zfs_mok_enrolled: "{{ zfs_mok_common_name in (zfs_mok_enrolled_list.stdout | default('')) }}"
 
+- name: Require the encrypted pool key from Ansible Vault
+  ansible.builtin.assert:
+    that:
+      - zfs_dataset_key is defined
+      - zfs_dataset_key | string | length > 0
+    fail_msg: >-
+      Define zfs_dataset_key in inventory/group_vars/nas/vault.yml using
+      Ansible Vault; do not put the key in plaintext inventory.
+  when: zfs_key_enabled | bool
+
+- name: Ensure the local pool-key directory exists
+  ansible.builtin.file:
+    path: "{{ zfs_key_file | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  when: zfs_key_enabled | bool
+
+- name: Install the encrypted-pool key from Ansible Vault
+  ansible.builtin.copy:
+    content: "{{ zfs_dataset_key }}"
+    dest: "{{ zfs_key_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  diff: false
+  when: zfs_key_enabled | bool
+
 # --- Module load --------------------------------------------------------------
 - name: Load the ZFS module
   ansible.builtin.command: modprobe zfs
@@ -165,20 +195,14 @@
   changed_when: false
   failed_when: false
 
-- name: Import pools that exist on disk but are not imported
-  ansible.builtin.command: zpool import -a
-  when:
-    - zfs_import_all | default(false) | bool
-    - zfs_existing_pools.rc != 0 or zfs_existing_pools.stdout_lines | length == 0
-
 - name: Verify every configured pool device exists
   ansible.builtin.stat:
     path: "{{ item.1 }}"
-  loop: "{{ zfs_pools | subelements('devices') }}"
+  loop: "{{ (zfs_pools + zfs_import_pools) | subelements('devices', skip_missing=True) }}"
   register: zfs_pool_devices
-  when: zfs_pools | length > 0
+  when: zfs_pools | length > 0 or zfs_import_pools | length > 0
 
-- name: Refuse to create pools from missing or non-by-id devices
+- name: Refuse pool operations from missing or non-by-id devices
   ansible.builtin.assert:
     that:
       - item.stat.exists
@@ -190,6 +214,105 @@
   loop: "{{ zfs_pool_devices.results | default([]) }}"
   loop_control:
     label: "{{ item.item.1 }}"
+
+- name: Import pools that exist on disk but are not imported
+  ansible.builtin.command:
+    cmd: "zpool import -a{% if zfs_key_enabled | bool %} -N{% endif %}"
+  when:
+    - zfs_import_all | default(false) | bool
+    - zfs_existing_pools.rc != 0 or zfs_existing_pools.stdout_lines | length == 0
+
+- name: Check read-only state of configured pools already imported
+  ansible.builtin.command:
+    cmd: "zpool get -H -o value readonly {{ item.name }}"
+  loop: "{{ zfs_import_pools }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: zfs_pool_readonly
+  changed_when: false
+  failed_when: false
+  when: zfs_key_enabled | bool
+
+- name: Export configured pools imported read-only for safe read-only inspection
+  ansible.builtin.command:
+    cmd: "zpool export {{ item.item.name }}"
+  loop: "{{ zfs_pool_readonly.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when:
+    - zfs_key_enabled | bool
+    - item.rc == 0
+    - item.stdout | trim == 'on'
+
+- name: Refresh the imported-pool list before targeted imports
+  ansible.builtin.command: zpool list -H -o name
+  register: zfs_existing_pools
+  changed_when: false
+  failed_when: false
+
+- name: Import configured existing pools
+  ansible.builtin.command:
+    cmd: >-
+      zpool import
+      {% if item.force | default(false) | bool %}-f{% endif %}
+      -d /dev/disk/by-id
+      -o cachefile=/etc/zfs/zpool.cache
+      {% if zfs_key_enabled | bool %}-N{% endif %}
+      {{ item.name }}
+  loop: "{{ zfs_import_pools }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: item.name not in (zfs_existing_pools.stdout_lines | default([]))
+  # This imports an existing pool only; it never creates or formats devices.
+
+- name: Refresh the list of imported pools
+  ansible.builtin.command: zpool list -H -o name
+  register: zfs_existing_pools
+  changed_when: false
+  failed_when: false
+
+- name: Read the configured encrypted dataset key format
+  ansible.builtin.command:
+    cmd: "zfs get -H -o value keyformat {{ zfs_key_dataset }}"
+  register: zfs_keyformat_result
+  changed_when: false
+  when: zfs_key_enabled | bool
+
+- name: Ensure the vault key format matches the pool
+  ansible.builtin.assert:
+    that:
+      - zfs_keyformat_result.stdout | trim == zfs_key_format
+    fail_msg: >-
+      Pool {{ zfs_key_dataset }} expects keyformat
+      {{ zfs_keyformat_result.stdout | trim }}, but Ansible is configured for
+      {{ zfs_key_format }}. Refusing to try the key with a mismatched format.
+  when: zfs_key_enabled | bool
+
+- name: Deploy the encrypted-pool unlock helper
+  ansible.builtin.template:
+    src: unlock-pool.sh.j2
+    dest: "{{ zfs_script_dir }}/unlock-pool.sh"
+    owner: root
+    group: root
+    mode: "0750"
+  when: zfs_key_enabled | bool
+
+- name: Deploy the encrypted-pool unlock systemd service
+  ansible.builtin.template:
+    src: zfs-unlock-pool.service.j2
+    dest: /etc/systemd/system/zfs-unlock-pool.service
+    owner: root
+    group: root
+    mode: "0644"
+  when: zfs_key_enabled | bool
+
+- name: Enable and run the encrypted-pool unlock service
+  ansible.builtin.systemd:
+    name: zfs-unlock-pool.service
+    enabled: true
+    state: started
+    daemon_reload: true
+  when: zfs_key_enabled | bool
 
 - name: Create the configured pools
   ansible.builtin.command:
@@ -279,7 +402,7 @@
       secureboot: "{{ zfs_secureboot }}"
       mok_enrolled: "{{ zfs_mok_enrolled }}"
       modules_signed: "{{ zfs_signing.stdout | default('already signed for every kernel') }}"
-      kernel_devel: "{{ 'installed' if zfs_kernel_devel is not failed else 'MISSING for ' ~ ansible_kernel ~ ' — link-time signing skipped' }}"
+      kernel_devel: "{{ 'installed' if zfs_kernel_devel is not failed else 'MISSING for ' ~ ansible_facts['kernel'] ~ ' — link-time signing skipped' }}"
       pools: "{{ zfs_existing_pools.stdout_lines | default([]) }}"
       scrub: "{{ zfs_scrub_calendar if zfs_scrub_enabled | bool else 'disabled' }}"
       manual_step: >-

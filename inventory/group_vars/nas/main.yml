@@ -4,23 +4,34 @@
 
 zfs_enabled: true
 
-# Leave empty until the disks are physically in the host, then list them by
-# /dev/disk/by-id/ (never /dev/sdX: the kernel renumbers USB disks on every
-# boot and re-enumeration).
-zfs_pools: []
-#  - name: tank
-#    type: mirror
-#    devices:
-#      - /dev/disk/by-id/usb-RTL9201R_...
-#      - /dev/disk/by-id/usb-RTL9201R_...
-#    properties:
-#      ashift: "12"
-#      compression: lz4
+# Existing mirror previously used by the TrueNAS VM. Import it on the host;
+# do not create a new pool or format these disks.
+zfs_import_pools:
+  - name: Data
+    force: true  # ZFS reports it was last accessed from another system (the VM).
+    devices:
+      - /dev/disk/by-id/usb-HGST_HTS_541010B7E610_012345679057-0:0-part1
+      - /dev/disk/by-id/usb-TOSHIBA_MQ01ABD100_012345679057-0:0-part1
 
+# Data is natively encrypted (AES-256-GCM); keyformat was verified as hex.
+# The secret zfs_dataset_key is defined only in the encrypted vault.yml.
+zfs_key_enabled: true
+zfs_key_dataset: Data
+zfs_key_format: hex
+
+# Use this only to create a genuinely new pool. Never put the existing disks
+# above here: `zpool create` would overwrite their current pool metadata.
+zfs_pools: []
+
+# Keep datasets unchanged for the first import; configure them after inspecting
+# the existing pool's datasets and mountpoints.
 zfs_datasets: []
-#  - name: tank/backup
-#    properties:
-#      compression: zstd
-#      mountpoint: /srv/backup
 
 zfs_scrub_calendar: "Sun *-*-* 03:00:00"
+
+# RustFS uses rootful Podman Quadlet and the existing ZFS pool directories.
+# Enable only after adding credentials to the encrypted vault.yml.
+rustfs_enabled: true
+rustfs_data_root: /Data/Docker/rustfs
+rustfs_console_enable: "true"
+rustfs_console_cors_allowed_origins: "*"

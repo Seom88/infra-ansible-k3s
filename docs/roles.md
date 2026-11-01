@@ -1,8 +1,8 @@
 # Roles
 
 Per-role reference: what each role consumes, what it does, and which asserts fail loudly.
-Play order is defined in [`../site.yml`](../site.yml) — four `import_playbook`
-entries (`base`, `k3s`, `virtualization`, `nas`), one play per function in
+Play order is defined in [`../site.yml`](../site.yml) — five `import_playbook`
+entries (`base`, `k3s`, `virtualization`, `nas`, `power`), one play per function in
 [`../plays/`](../plays/). Shared tunables live in
 [`../inventory/group_vars/all/main.yml`](../inventory/group_vars/all/main.yml).
 
@@ -11,7 +11,7 @@ Order on the wire:
 ```
 base → k3s (k3s_prereqs → kernel_modules → longhorn_prereqs → k3s server
        → k3s agents → cilium → argocd) → virtualization (cockpit)
-       → nas (zfs)
+        → nas (zfs → rustfs)
 ```
 
 Firewall model: **no single firewall role.** `base` owns only the common
@@ -192,13 +192,14 @@ group so k3s-only nodes never install it.
 
 | | |
 | --- | --- |
-| **Runs on** | `nas` (`plays/nas.yml`), empty group by default |
-| **Repo** | `zfs-release-3-0` from zfsonlinux.org, `zfs-kmod` enabled (kABI kmods, no DKMS) |
-| **Packages** | `kmod-zfs`, `zfs`, `dnf-plugins-core`; `kernel-devel-<running>` for `sign-file` |
+| **Runs on** | `nas` (`plays/nas.yml`); only hosts listed in that inventory group |
+| **Repo** | OpenZFS `zfs-kmod` kABI repo; the signing key fingerprint is verified and the repo is managed directly with `gpgcheck=1` |
+| **Packages** | `kmod-zfs`, `zfs`, `mokutil`, `python3-dnf-plugin-post-transaction-actions`; `kernel-devel-<running>` for `sign-file` |
 | **Secure Boot** | generates `/var/lib/zfs-mok/{MOK.priv,MOK.der}` and signs every ZFS module; **enrolling the MOK and rebooting is manual** (see runbook) |
 | **Re-sign** | dnf `post-transaction-actions` hook on `kernel*` / `kmod-zfs*` |
-| **Pools** | `zfs_pools` created from `/dev/disk/by-id/...` only; the role asserts the path and existence; `zfs_import_all` is off by default |
+| **Pools** | `zfs_import_pools` imports named existing pools without creating/formatting; `zfs_pools` creates only explicitly configured new pools. Both require existing `/dev/disk/by-id/...` paths; `zfs_import_all` is off by default |
 | **Datasets** | optional `zfs_datasets` with ZFS properties |
+| **Encrypted import** | optional Vault variable `zfs_dataset_key` is installed root-only; a systemd oneshot loads the key and mounts datasets after pool import and before `zfs-mount.service` |
 | **Scrub** | `zfs-scrub.timer`, `zfs_scrub_calendar` (Sun 03:00), `Persistent=true`; skips a running scrub and journals `zpool status -x` |
 
 **Why kmod and not DKMS:** no rebuild per kernel update. **Why by-id:** USB
@@ -206,6 +207,26 @@ enumeration renumbers `/dev/sdX` on every boot, which is exactly what broke the
 old TrueNAS passthrough. **Why the MOK is local and manual:** AlmaLinux does not
 sign third-party modules, and firmware MOK enrollment cannot be automated by
 design.
+
+## `rustfs`
+
+**Purpose:** run RustFS on the host's ZFS pool, reached through a Tailscale
+sidecar, without adding a Docker daemon.
+
+| | |
+| --- | --- |
+| **Runs on** | `nas` (`plays/nas.yml`), gated by `rustfs_enabled` (false until credentials are in Vault) |
+| **Runtime** | rootful Podman Quadlet; Tailscale and RustFS share a pod network namespace |
+| **Data** | `/Data/Docker/rustfs/{data,config,ts-state}`; verifies `/Data` is mounted as ZFS before start |
+| **Secrets** | `rustfs_ts_authkey`, `rustfs_access_key`, and `rustfs_secret_key` from the ignored Ansible Vault file; deployed only as root-owned `0600` env files with task output/diff suppressed |
+| **Tailscale** | `/dev/net/tun`, `NET_ADMIN`, `NET_RAW`, kernel networking, UDP 41642 by default (distinct from the host's Tailscale UDP 41641); existing `config/serve.json` is preserved and mounted read-only |
+| **Health/recovery** | Podman healthchecks; unhealthy containers are killed and systemd restarts their Quadlet services, replacing the Docker autoheal container |
+| **SELinux** | bind mounts use private `:Z` labels; existing directory ownership is preserved |
+| **Initial start** | systemd startup timeout is unbounded because Podman must recursively SELinux-label the existing data tree on first use |
+
+The role does not install Docker or `podman-compose`; Quadlet lets systemd
+manage the containers directly. It remains disabled until credentials are
+added to `inventory/group_vars/nas/vault.yml`.
 
 ## `usb_autosuspend`
 

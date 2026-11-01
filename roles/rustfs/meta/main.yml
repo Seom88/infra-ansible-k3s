@@ -1,0 +1,8 @@
+---
+galaxy_info:
+  role_name: rustfs
+  author: local
+  description: Run RustFS with a Tailscale sidecar using rootful Podman Quadlet.
+  min_ansible_version: "2.14"
+
+dependencies: []

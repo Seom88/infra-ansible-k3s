@@ -1,0 +1,28 @@
+[Unit]
+Description=Tailscale network sidecar for RustFS
+Requires=rustfs-pod.service
+After=rustfs-pod.service
+
+[Container]
+ContainerName=rustfs-ts
+Image={{ rustfs_tailscale_image }}
+Pod=rustfs.pod
+EnvironmentFile={{ rustfs_secret_dir }}/rustfs-tailscale.env
+Volume={{ rustfs_data_root }}/ts-state:/var/lib/tailscale:Z
+Volume={{ rustfs_data_root }}/config:/config:ro,Z
+AddDevice=/dev/net/tun
+AddCapability=NET_ADMIN
+AddCapability=NET_RAW
+HealthCmd=tailscale status
+HealthInterval=10s
+HealthTimeout=5s
+HealthRetries=12
+HealthStartPeriod=120s
+HealthOnFailure=kill
+
+[Service]
+Restart=always
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
