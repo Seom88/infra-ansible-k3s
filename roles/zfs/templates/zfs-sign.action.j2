@@ -1,0 +1,5 @@
+# Re-sign the OpenZFS modules after any transaction that installs a kernel or
+# a new kmod-zfs build. dnf runs this through post-transaction-actions.
+# Format: <package spec>:<in|out|any>:<command>
+kernel*:in:{{ zfs_script_dir }}/sign-zfs-modules.sh --all
+kmod-zfs*:in:{{ zfs_script_dir }}/sign-zfs-modules.sh --all

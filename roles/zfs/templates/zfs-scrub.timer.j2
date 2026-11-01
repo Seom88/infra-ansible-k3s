@@ -1,0 +1,12 @@
+[Unit]
+Description=Run the ZFS scrub weekly
+
+[Timer]
+OnCalendar={{ zfs_scrub_calendar }}
+# A missed window (node powered off) is replayed on the next boot: a scrub is
+# cheap insurance, not a job that must be skipped.
+Persistent=true
+AccuracySec=1h
+
+[Install]
+WantedBy=timers.target

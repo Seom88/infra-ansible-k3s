@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Weekly scrub for every imported pool (or the configured list).
+# A pool whose scrub is already running is left alone.
+
+set -euo pipefail
+
+POOLS="{{ zfs_scrub_pools | join(' ') }}"
+
+log() { echo "zfs-scrub: $*"; }
+
+if [[ -z "$POOLS" ]]; then
+    mapfile -t POOLS < <(zpool list -H -o name)
+else
+    read -r -a POOLS <<< "$POOLS"
+fi
+
+if (( ${#POOLS[@]} == 0 )); then
+    log "no imported pools"
+    exit 0
+fi
+
+for pool in "${POOLS[@]}"; do
+    if ! zpool list -H -o name "$pool" >/dev/null 2>&1; then
+        log "skip ${pool}: not imported"
+        continue
+    fi
+
+    if zpool status -p "$pool" | grep -q "scrub in progress"; then
+        log "skip ${pool}: scrub already running"
+        continue
+    fi
+
+    log "starting scrub on ${pool}"
+    zpool scrub "$pool"
+done
+
+# Make degradation visible in the journal without failing the unit.
+zpool status -x || true

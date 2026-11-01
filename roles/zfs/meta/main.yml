@@ -1,0 +1,11 @@
+---
+galaxy_info:
+  role_name: zfs
+  author: local
+  description: >
+    OpenZFS on AlmaLinux hosts that own NAS disks: kABI-tracking kmods, local
+    MOK generation and module signing (Secure Boot), mirror pools from
+    /dev/disk/by-id, datasets and a scheduled scrub.
+  min_ansible_version: "2.14"
+
+dependencies: []

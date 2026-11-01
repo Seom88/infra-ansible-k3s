@@ -1,0 +1,26 @@
+---
+# OpenZFS configuration for hosts in the `nas` group.
+# The role is inert until a host is added to that group in inventory/hosts.yml.
+
+zfs_enabled: true
+
+# Leave empty until the disks are physically in the host, then list them by
+# /dev/disk/by-id/ (never /dev/sdX: the kernel renumbers USB disks on every
+# boot and re-enumeration).
+zfs_pools: []
+#  - name: tank
+#    type: mirror
+#    devices:
+#      - /dev/disk/by-id/usb-RTL9201R_...
+#      - /dev/disk/by-id/usb-RTL9201R_...
+#    properties:
+#      ashift: "12"
+#      compression: lz4
+
+zfs_datasets: []
+#  - name: tank/backup
+#    properties:
+#      compression: zstd
+#      mountpoint: /srv/backup
+
+zfs_scrub_calendar: "Sun *-*-* 03:00:00"

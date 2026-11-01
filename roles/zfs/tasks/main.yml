@@ -1,0 +1,271 @@
+---
+- name: Refuse to run where OpenZFS is not wanted
+  ansible.builtin.assert:
+    that:
+      - zfs_enabled | bool
+      - ansible_distribution in ['AlmaLinux', 'Rocky', 'RedHat', 'CentOS']
+      - ansible_distribution_major_version is version('9', '>=')
+    fail_msg: >-
+      The zfs role targets EL9/EL10 hosts and only runs where zfs_enabled is
+      true. Apply it through plays/nas.yml to the `nas` group.
+
+# --- Repositories and packages ----------------------------------------------
+- name: Install the OpenZFS release repository package
+  ansible.builtin.dnf:
+    name: "{{ zfs_release_url }}"
+    state: present
+    disable_gpg_check: false
+
+- name: Disable the DKMS and testing ZFS repositories
+  ansible.builtin.ini_file:
+    path: "{{ zfs_repo_file }}"
+    section: "{{ item }}"
+    option: enabled
+    value: "0"
+    mode: "0644"
+  loop: "{{ zfs_repo_disabled }}"
+
+- name: Enable the kABI-tracking kmod repository
+  ansible.builtin.ini_file:
+    path: "{{ zfs_repo_file }}"
+    section: "{{ zfs_repo_enabled }}"
+    option: enabled
+    value: "1"
+    mode: "0644"
+
+# sign-file lives in kernel-devel; the running kernel needs its matching build
+# even when kmod-zfs is already compiled for it.
+- name: Install kernel-devel for the running kernel
+  ansible.builtin.dnf:
+    name: "kernel-devel-{{ ansible_kernel }}"
+    state: present
+  register: zfs_kernel_devel
+  failed_when: false
+
+- name: Install the OpenZFS packages
+  ansible.builtin.dnf:
+    name: "{{ zfs_packages }}"
+    state: present
+
+# --- Secure Boot state --------------------------------------------------------
+- name: Read the Secure Boot state
+  ansible.builtin.command: mokutil --sb-state
+  register: zfs_sb_state
+  changed_when: false
+  failed_when: false
+
+- name: Record whether Secure Boot is enforced
+  ansible.builtin.set_fact:
+    zfs_secureboot: "{{ 'SecureBoot enabled' in (zfs_sb_state.stdout | default('')) }}"
+
+# --- Local MOK and module signing ---------------------------------------------
+- name: Ensure the MOK directory exists
+  ansible.builtin.file:
+    path: "{{ zfs_mok_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Generate the local module-signing keypair
+  ansible.builtin.command:
+    cmd: >-
+      openssl req -x509 -newkey rsa:2048 -nodes
+      -keyout {{ zfs_mok_key }}
+      -outform DER -out {{ zfs_mok_cert }}
+      -days {{ zfs_mok_days }}
+      -subj "/CN={{ zfs_mok_common_name }}/"
+    creates: "{{ zfs_mok_cert }}"
+
+- name: Keep the private key root-only
+  ansible.builtin.file:
+    path: "{{ zfs_mok_key }}"
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Deploy the module-signing script
+  ansible.builtin.template:
+    src: sign-zfs-modules.sh.j2
+    dest: "{{ zfs_script_dir }}/sign-zfs-modules.sh"
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Sign the OpenZFS modules with the local MOK
+  ansible.builtin.command:
+    cmd: "{{ zfs_script_dir }}/sign-zfs-modules.sh --all"
+  register: zfs_signing
+  changed_when: "'signed ' in zfs_signing.stdout"
+
+- name: Import the local MOK (only when explicitly requested)
+  ansible.builtin.assert:
+    that:
+      - zfs_mok_password is defined
+      - zfs_mok_password | length > 0
+    fail_msg: >-
+      zfs_mok_import is true but zfs_mok_password is empty. Supply the one-time
+      MokManager password (vault or --extra-vars) or leave zfs_mok_import false
+      and run `mokutil --import` by hand.
+  when: zfs_mok_import | bool
+
+- name: Import the local MOK into the firmware keyring
+  ansible.builtin.command:
+    cmd: "mokutil --import {{ zfs_mok_cert }}"
+    stdin: "{{ zfs_mok_password }}\n{{ zfs_mok_password }}\n"
+  when: zfs_mok_import | bool
+  no_log: true
+
+- name: Read the enrolled MOK certificates
+  ansible.builtin.command: mokutil --list-enrolled
+  register: zfs_mok_enrolled_list
+  changed_when: false
+  failed_when: false
+
+- name: Record whether the local MOK is already enrolled
+  ansible.builtin.set_fact:
+    zfs_mok_enrolled: "{{ zfs_mok_common_name in (zfs_mok_enrolled_list.stdout | default('')) }}"
+
+# --- Module load --------------------------------------------------------------
+- name: Load the ZFS module
+  ansible.builtin.command: modprobe zfs
+  when:
+    - not zfs_secureboot | bool or zfs_mok_enrolled | bool
+
+- name: Load the ZFS module at boot
+  ansible.builtin.copy:
+    dest: /etc/modules-load.d/zfs.conf
+    content: "zfs\n"
+    owner: root
+    group: root
+    mode: "0644"
+  when:
+    - zfs_load_module_at_boot | bool
+    - not zfs_secureboot | bool or zfs_mok_enrolled | bool
+
+# --- Pools and datasets -------------------------------------------------------
+- name: Check whether zpool is available
+  ansible.builtin.command: zpool list -H -o name
+  register: zfs_existing_pools
+  changed_when: false
+  failed_when: false
+
+- name: Import pools that exist on disk but are not imported
+  ansible.builtin.command: zpool import -a
+  when:
+    - zfs_import_all | default(false) | bool
+    - zfs_existing_pools.rc != 0 or zfs_existing_pools.stdout_lines | length == 0
+
+- name: Verify every configured pool device exists
+  ansible.builtin.stat:
+    path: "{{ item.1 }}"
+  loop: "{{ zfs_pools | subelements('devices') }}"
+  register: zfs_pool_devices
+  when: zfs_pools | length > 0
+
+- name: Refuse to create pools from missing or non-by-id devices
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+      - "'/dev/disk/by-id/' in item.item.1"
+    fail_msg: >-
+      Pool device {{ item.item.1 }} is missing or does not use a
+      /dev/disk/by-id/ path. Stable paths are mandatory: /dev/sdX changes
+      across boots and USB re-enumeration.
+  loop: "{{ zfs_pool_devices.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.1 }}"
+
+- name: Create the configured pools
+  ansible.builtin.command:
+    cmd: >-
+      zpool create
+      {% for key, value in (item.properties | default({})).items() -%}
+      -o {{ key }}={{ value }}
+      {% endfor -%}
+      {{ item.name }}
+      {% if item.type | default('stripe') != 'stripe' %}{{ item.type }}{% endif %}
+      {{ item.devices | join(' ') }}
+  loop: "{{ zfs_pools }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: item.name not in (zfs_existing_pools.stdout_lines | default([]))
+
+- name: Read the existing datasets
+  ansible.builtin.command: zfs list -H -o name
+  register: zfs_existing_datasets
+  changed_when: false
+  failed_when: false
+
+- name: Create the configured datasets
+  ansible.builtin.command:
+    cmd: >-
+      zfs create
+      {% for key, value in (item.properties | default({})).items() -%}
+      -o {{ key }}={{ value }}
+      {% endfor -%}
+      {{ item.name }}
+  loop: "{{ zfs_datasets }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: item.name not in (zfs_existing_datasets.stdout_lines | default([]))
+
+# --- Scheduled scrub ----------------------------------------------------------
+- name: Refuse an unparseable scrub calendar
+  ansible.builtin.command:
+    cmd: systemd-analyze calendar "{{ zfs_scrub_calendar }}"
+  register: zfs_scrub_calendar_check
+  changed_when: false
+  when: zfs_scrub_enabled | bool
+
+- name: Deploy the scrub script
+  ansible.builtin.template:
+    src: scrub.sh.j2
+    dest: "{{ zfs_script_dir }}/scrub.sh"
+    owner: root
+    group: root
+    mode: "0750"
+  when: zfs_scrub_enabled | bool
+
+- name: Deploy the scrub service and timer
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/etc/systemd/system/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - zfs-scrub.service
+    - zfs-scrub.timer
+  when: zfs_scrub_enabled | bool
+  notify: systemd daemon-reload
+
+- name: Enable the scrub timer
+  ansible.builtin.systemd:
+    name: zfs-scrub.timer
+    enabled: true
+    state: started
+  when: zfs_scrub_enabled | bool
+
+# --- Re-sign on updates -------------------------------------------------------
+- name: Deploy the dnf re-sign hook
+  ansible.builtin.template:
+    src: zfs-sign.action.j2
+    dest: /etc/dnf/plugins/post-transaction-actions.d/zfs-sign.action
+    owner: root
+    group: root
+    mode: "0644"
+  when: zfs_resign_on_update | bool
+
+# --- Report -------------------------------------------------------------------
+- name: Show the ZFS state this role converged to
+  ansible.builtin.debug:
+    msg:
+      secureboot: "{{ zfs_secureboot }}"
+      mok_enrolled: "{{ zfs_mok_enrolled }}"
+      modules_signed: "{{ zfs_signing.stdout | default('already signed for every kernel') }}"
+      kernel_devel: "{{ 'installed' if zfs_kernel_devel is not failed else 'MISSING for ' ~ ansible_kernel ~ ' — link-time signing skipped' }}"
+      pools: "{{ zfs_existing_pools.stdout_lines | default([]) }}"
+      scrub: "{{ zfs_scrub_calendar if zfs_scrub_enabled | bool else 'disabled' }}"
+      manual_step: >-
+        {{ 'Enroll the MOK once: `mokutil --import ' ~ zfs_mok_cert ~ '`, reboot and confirm in MokManager. Until then the signed modules are rejected by Secure Boot.' if (zfs_secureboot | bool and not zfs_mok_enrolled | bool) else 'none' }}

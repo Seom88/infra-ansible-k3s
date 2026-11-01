@@ -1,0 +1,78 @@
+---
+# ZFS on the host. The role is only applied to the `nas` inventory group, so
+# hypervisors and k3s nodes that have no NAS disks never pay for OpenZFS.
+zfs_enabled: true
+
+# OpenZFS release package (adds the zfs/zfs-kmod repositories + GPG key).
+# ${releasever} is expanded by dnf, so the URL never pins a minor release.
+zfs_release_url: "https://zfsonlinux.org/epel/zfs-release-3-0.el{{ ansible_distribution_major_version }}.noarch.rpm"
+
+# kABI-tracking kmods instead of DKMS: distribution kernels only, no rebuild
+# per kernel update. Requires the distro kernel (which this repo already uses).
+zfs_repo_file: /etc/yum.repos.d/zfs.repo
+zfs_repo_enabled: zfs-kmod
+zfs_repo_disabled:
+  - zfs
+  - zfs-testing
+  - zfs-testing-kmod
+
+zfs_packages:
+  - kmod-zfs
+  - zfs
+  - mokutil              # Secure Boot state + MOK enrollment
+  - dnf-plugins-core   # post-transaction-actions hook for re-signing
+
+# Load the module at boot even before a pool exists.
+zfs_load_module_at_boot: true
+
+# Where the helper scripts live.
+zfs_script_dir: /usr/local/lib/zfs
+
+# --- Secure Boot / module signing -------------------------------------------
+# OpenZFS kmods are not signed by AlmaLinux. With Secure Boot enabled the
+# modules only load after the local MOK is enrolled (manual, once) and every
+# module is signed with that key. The role generates the key and signs the
+# modules; enrolling the key in the firmware and rebooting stays a documented
+# manual step on purpose.
+zfs_mok_enabled: true
+zfs_mok_dir: /var/lib/zfs-mok
+zfs_mok_key: "{{ zfs_mok_dir }}/MOK.priv"
+zfs_mok_cert: "{{ zfs_mok_dir }}/MOK.der"
+zfs_mok_common_name: "ZFS module signing"
+zfs_mok_days: 36500
+# Set true only if you want the role to run `mokutil --import`; the firmware
+# confirmation and the reboot remain manual either way. When false (default),
+# run the import from the runbook.
+zfs_mok_import: false
+# zfs_mok_password: ""   # one-time MokManager password; vault or --extra-vars
+
+# Re-sign the modules after kmod-zfs / kernel updates (dnf hook).
+zfs_resign_on_update: true
+
+# --- Pools and datasets ------------------------------------------------------
+# Never use /dev/sdX here: those names are not stable across boots or USB
+# re-enumeration. Use /dev/disk/by-id/... paths.
+zfs_pools: []
+#  - name: tank
+#    type: mirror            # mirror | raidz1 | raidz2 | stripe
+#    devices:
+#      - /dev/disk/by-id/usb-RTL9201R_...
+#      - /dev/disk/by-id/usb-RTL9201R_...
+#    properties:
+#      ashift: "12"
+#      compression: lz4
+
+zfs_datasets: []
+#  - name: tank/backup
+#    properties:
+#      compression: zstd
+#      mountpoint: /srv/backup
+
+# Import every discoverable pool before creating new ones. Off by default: a
+# NAS node should import its own pools, never a stray disk left attached.
+zfs_import_all: false
+
+# --- Scrub -------------------------------------------------------------------
+zfs_scrub_enabled: true
+zfs_scrub_calendar: "Sun *-*-* 03:00:00"
+zfs_scrub_pools: []   # empty = every imported pool

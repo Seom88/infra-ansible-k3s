@@ -1,0 +1,10 @@
+[Unit]
+Description=Scheduled OpenZFS scrub
+Documentation=man:zpool-scrub(8)
+After=zfs.target
+
+[Service]
+Type=oneshot
+Nice=19
+IOSchedulingClass=idle
+ExecStart={{ zfs_script_dir | default('/usr/local/lib/zfs') }}/scrub.sh

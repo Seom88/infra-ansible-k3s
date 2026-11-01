@@ -1,8 +1,8 @@
 # Roles
 
 Per-role reference: what each role consumes, what it does, and which asserts fail loudly.
-Play order is defined in [`../site.yml`](../site.yml) — three `import_playbook`
-entries (`base`, `k3s`, `virtualization`), one play per function in
+Play order is defined in [`../site.yml`](../site.yml) — four `import_playbook`
+entries (`base`, `k3s`, `virtualization`, `nas`), one play per function in
 [`../plays/`](../plays/). Shared tunables live in
 [`../inventory/group_vars/all/main.yml`](../inventory/group_vars/all/main.yml).
 
@@ -11,6 +11,7 @@ Order on the wire:
 ```
 base → k3s (k3s_prereqs → kernel_modules → longhorn_prereqs → k3s server
        → k3s agents → cilium → argocd) → virtualization (cockpit)
+       → nas (zfs)
 ```
 
 Firewall model: **no single firewall role.** `base` owns only the common
@@ -183,6 +184,28 @@ Key values (justification in [`architecture.md`](architecture.md)):
   pinned `helm-diff`, `systemctl is-active` probes, and `creates`/`removes` guards.
 - **No secrets in git:** no tokens, no kubeconfigs — k3s generates credentials and the
   role only reads the root kubeconfig in place (`0600`).
+
+## `zfs`
+
+**Purpose:** OpenZFS on hosts that own NAS disks, applied only to the `nas`
+group so k3s-only nodes never install it.
+
+| | |
+| --- | --- |
+| **Runs on** | `nas` (`plays/nas.yml`), empty group by default |
+| **Repo** | `zfs-release-3-0` from zfsonlinux.org, `zfs-kmod` enabled (kABI kmods, no DKMS) |
+| **Packages** | `kmod-zfs`, `zfs`, `dnf-plugins-core`; `kernel-devel-<running>` for `sign-file` |
+| **Secure Boot** | generates `/var/lib/zfs-mok/{MOK.priv,MOK.der}` and signs every ZFS module; **enrolling the MOK and rebooting is manual** (see runbook) |
+| **Re-sign** | dnf `post-transaction-actions` hook on `kernel*` / `kmod-zfs*` |
+| **Pools** | `zfs_pools` created from `/dev/disk/by-id/...` only; the role asserts the path and existence; `zfs_import_all` is off by default |
+| **Datasets** | optional `zfs_datasets` with ZFS properties |
+| **Scrub** | `zfs-scrub.timer`, `zfs_scrub_calendar` (Sun 03:00), `Persistent=true`; skips a running scrub and journals `zpool status -x` |
+
+**Why kmod and not DKMS:** no rebuild per kernel update. **Why by-id:** USB
+enumeration renumbers `/dev/sdX` on every boot, which is exactly what broke the
+old TrueNAS passthrough. **Why the MOK is local and manual:** AlmaLinux does not
+sign third-party modules, and firmware MOK enrollment cannot be automated by
+design.
 
 ## `usb_autosuspend`
 

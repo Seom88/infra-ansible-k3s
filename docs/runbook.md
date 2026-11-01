@@ -182,6 +182,40 @@ replayed at boot. Setting `scheduled_shutdown_enabled: false` stops, disables an
 The stop is graceful (`shutdown -h now`), so k3s gets its stop timeout instead of
 a hard reset; Longhorn volumes reattach and pods restart after the next boot.
 
+## ZFS on the host (NAS group)
+
+`plays/nas.yml` runs the `zfs` role on hosts in the `nas` group. Add the host,
+then fill `inventory/group_vars/nas/main.yml` with `/dev/disk/by-id/` devices:
+
+```bash
+ansible-playbook plays/nas.yml --check --diff   # see the plan first
+ansible-playbook plays/nas.yml
+```
+
+### Enroll the signing key (manual, once)
+
+Secure Boot is enabled on the target hosts and AlmaLinux does not sign
+third-party modules, so the role generates a local MOK and signs the modules,
+but the firmware must be told to trust that key. This is deliberately manual:
+
+```bash
+sudo mokutil --import /var/lib/zfs-mok/MOK.der   # choose a one-time password
+sudo reboot
+# In the blue MokManager screen: Enroll MOK -> Continue -> Yes -> password -> Reboot
+```
+
+Then confirm both the enrollment and the module:
+
+```bash
+mokutil --list-enrolled | grep -i "ZFS module signing"
+modinfo -F signer zfs
+sudo modprobe zfs && zpool status
+```
+
+Re-run `plays/nas.yml` afterwards: it reports `mok_enrolled: true` and loads the
+module. Kernel and `kmod-zfs` updates re-sign automatically through the dnf
+`post-transaction-actions` hook; no manual signing after the first enrollment.
+
 ## Nightly hygiene
 
 - `git status` — clean tree; `main` is the deliverable.

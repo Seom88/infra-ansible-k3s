@@ -1,0 +1,122 @@
+#!/usr/bin/env bash
+# Sign the OpenZFS kernel modules with the local MOK.
+#
+# OpenZFS ships its kmods unsigned, and AlmaLinux does not sign third-party
+# modules, so Secure Boot rejects them until they carry a key that is enrolled
+# in the firmware. This script signs every ZFS module for every installed
+# kernel that has matching kernel-devel sources.
+#
+# Usage: sign-zfs-modules.sh [--all | <kernel-release>]
+#   --all              sign every installed kernel (default for the dnf hook)
+#   <kernel-release>    sign only that kernel (default: running kernel)
+
+set -euo pipefail
+
+MOK_KEY="{{ zfs_mok_key }}"
+MOK_CERT="{{ zfs_mok_cert }}"
+MOK_CN="{{ zfs_mok_common_name }}"
+
+# Modules shipped by kmod-zfs.
+MODULES=(zfs spl zcommon znvpair zavl zicp zunicode)
+
+log() { echo "sign-zfs: $*" >&2; }
+
+sign_one() {
+    local module_path="$1" sign_file="$2"
+    local work=""
+    local tmp=""
+
+    # modinfo understands compressed modules, so this works for .ko.xz too.
+    local signer
+    signer=$(modinfo -F signer "$module_path" 2>/dev/null || true)
+    if [[ "$signer" == "$MOK_CN" ]]; then
+        return 1
+    fi
+
+    case "$module_path" in
+        *.xz)
+            tmp=$(mktemp --suffix=.ko)
+            xz -dc "$module_path" > "$tmp"
+            ;;
+        *.zst)
+            tmp=$(mktemp --suffix=.ko)
+            zstd -dc "$module_path" > "$tmp"
+            ;;
+        *)
+            tmp="$module_path"
+            ;;
+    esac
+
+    "$sign_file" sha256 "$MOK_KEY" "$MOK_CERT" "$tmp"
+
+    case "$module_path" in
+        *.xz)
+            xz -c "$tmp" > "$module_path"
+            rm -f "$tmp"
+            ;;
+        *.zst)
+            zstd -c "$tmp" > "$module_path"
+            rm -f "$tmp"
+            ;;
+    esac
+    return 0
+}
+
+sign_kernel() {
+    local kver="$1"
+    local sign_file="/usr/src/kernels/${kver}/scripts/sign-file"
+    local count=0
+
+    if [[ ! -x "$sign_file" ]]; then
+        log "skip ${kver}: no kernel-devel sources (install kernel-devel-${kver})"
+        return 0
+    fi
+
+    local module_dir="/lib/modules/${kver}"
+    if [[ ! -d "$module_dir" ]]; then
+        log "skip ${kver}: no module tree"
+        return 0
+    fi
+
+    local found=0
+    for name in "${MODULES[@]}"; do
+        while IFS= read -r -d '' ko; do
+            found=1
+            if sign_one "$ko" "$sign_file"; then
+                count=$((count + 1))
+            fi
+        done < <(find "$module_dir" -type f \( -name "${name}.ko" -o -name "${name}.ko.xz" -o -name "${name}.ko.zst" \) -print0)
+    done
+
+    if (( found == 0 )); then
+        log "skip ${kver}: kmod-zfs is not installed for this kernel"
+        return 0
+    fi
+
+    if (( count > 0 )); then
+        echo "signed ${count} module(s) for ${kver}"
+    else
+        log "${kver}: already signed with ${MOK_CN}"
+    fi
+}
+
+main() {
+    if [[ ! -f "$MOK_KEY" || ! -f "$MOK_CERT" ]]; then
+        log "ERROR: MOK keypair missing at $(dirname "$MOK_KEY") — run the zfs role first"
+        exit 1
+    fi
+
+    case "${1:-}" in
+        --all|"")
+            for kver_dir in /lib/modules/*; do
+                [[ -d "$kver_dir" ]] || continue
+                sign_kernel "$(basename "$kver_dir")"
+            done
+            ;;
+        *)
+            sign_kernel "$1"
+            ;;
+    esac
+}
+
+main "$@"
