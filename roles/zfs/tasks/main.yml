@@ -10,27 +10,34 @@
       true. Apply it through plays/nas.yml to the `nas` group.
 
 # --- Repositories and packages ----------------------------------------------
-- name: Install the OpenZFS release repository package
-  ansible.builtin.dnf:
-    name: "{{ zfs_release_url }}"
-    state: present
-    disable_gpg_check: false
-
-- name: Disable the DKMS and testing ZFS repositories
-  ansible.builtin.ini_file:
-    path: "{{ zfs_repo_file }}"
-    section: "{{ item }}"
-    option: enabled
-    value: "0"
+- name: Download the OpenZFS signing key
+  ansible.builtin.get_url:
+    url: "{{ zfs_gpg_key_url }}"
+    dest: "{{ zfs_gpg_key_file }}"
+    owner: root
+    group: root
     mode: "0644"
-  loop: "{{ zfs_repo_disabled }}"
 
-- name: Enable the kABI-tracking kmod repository
-  ansible.builtin.ini_file:
-    path: "{{ zfs_repo_file }}"
-    section: "{{ zfs_repo_enabled }}"
-    option: enabled
-    value: "1"
+- name: Import the OpenZFS signing key
+  # Fingerprint from the OpenZFS docs (signing key2, EL9+). rpm_key refuses to
+  # import the key if it does not match, so this doubles as a supply-chain check.
+  ansible.builtin.rpm_key:
+    key: "{{ zfs_gpg_key_file }}"
+    fingerprint: "{{ zfs_gpg_key_fingerprint }}"
+    state: present
+
+- name: Drop the unsigned zfs-release RPM when present
+  # It only shipped the repo file and key; both are managed by this role now.
+  ansible.builtin.dnf:
+    name: zfs-release
+    state: absent
+
+- name: Deploy the OpenZFS repository definition
+  ansible.builtin.template:
+    src: zfs.repo.j2
+    dest: "{{ zfs_repo_file }}"
+    owner: root
+    group: root
     mode: "0644"
 
 # sign-file lives in kernel-devel; the running kernel needs its matching build
@@ -83,6 +90,14 @@
     owner: root
     group: root
     mode: "0600"
+
+- name: Ensure the helper script directory exists
+  ansible.builtin.file:
+    path: "{{ zfs_script_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
 
 - name: Deploy the module-signing script
   ansible.builtin.template:

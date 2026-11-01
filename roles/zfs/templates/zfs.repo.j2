@@ -1,0 +1,20 @@
+# Managed by Ansible (infra-k3s roles/zfs) — do not edit by hand.
+# The upstream zfs-release RPM is unsigned, so this repo definition is deployed
+# directly and its signing key is imported with a fingerprint check instead of
+# installing that RPM with GPG verification disabled.
+
+[zfs]
+name=OpenZFS for EL$releasever - dkms
+baseurl={{ zfs_repo_dkms_baseurl }}
+enabled={{ '1' if zfs_repo_enabled == 'zfs' else '0' }}
+metadata_expire=7d
+gpgcheck=1
+gpgkey=file://{{ zfs_gpg_key_file }}
+
+[zfs-kmod]
+name=OpenZFS for EL$releasever - kmod
+baseurl={{ zfs_repo_kmod_baseurl }}
+enabled={{ '1' if zfs_repo_enabled == 'zfs-kmod' else '0' }}
+metadata_expire=7d
+gpgcheck=1
+gpgkey=file://{{ zfs_gpg_key_file }}

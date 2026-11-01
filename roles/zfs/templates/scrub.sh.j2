@@ -14,7 +14,7 @@ else
     read -r -a POOLS <<< "$POOLS"
 fi
 
-if (( ${#POOLS[@]} == 0 )); then
+if [[ -z "${POOLS[*]:-}" ]]; then
     log "no imported pools"
     exit 0
 fi

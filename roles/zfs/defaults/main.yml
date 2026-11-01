@@ -3,24 +3,29 @@
 # hypervisors and k3s nodes that have no NAS disks never pay for OpenZFS.
 zfs_enabled: true
 
-# OpenZFS release package (adds the zfs/zfs-kmod repositories + GPG key).
-# ${releasever} is expanded by dnf, so the URL never pins a minor release.
-zfs_release_url: "https://zfsonlinux.org/epel/zfs-release-3-0.el{{ ansible_distribution_major_version }}.noarch.rpm"
+# --- OpenZFS repository ------------------------------------------------------
+# The upstream zfs-release RPM is not GPG-signed, so instead of installing it
+# with checks disabled this role imports the OpenZFS signing key (fingerprint
+# verified) and writes the repo definition itself. Package signature checking
+# therefore stays enabled end to end.
+zfs_gpg_key_url: "https://raw.githubusercontent.com/zfsonlinux/zfsonlinux.github.com/master/zfs-release/RPM-GPG-KEY-openzfs-key2"
+zfs_gpg_key_fingerprint: "7DC7 299D CF7C 7FD9 CD87 701B A599 FD5E 9DB8 4141"
+zfs_gpg_key_file: "/etc/pki/rpm-gpg/RPM-GPG-KEY-openzfs-key2"
 
 # kABI-tracking kmods instead of DKMS: distribution kernels only, no rebuild
 # per kernel update. Requires the distro kernel (which this repo already uses).
 zfs_repo_file: /etc/yum.repos.d/zfs.repo
-zfs_repo_enabled: zfs-kmod
-zfs_repo_disabled:
-  - zfs
-  - zfs-testing
-  - zfs-testing-kmod
+zfs_repo_enabled: zfs-kmod          # zfs-kmod (kABI) | zfs (DKMS)
+# ${releasever} is expanded by dnf, so the URLs never pin a minor release.
+zfs_repo_kmod_baseurl: "http://download.zfsonlinux.org/epel/$releasever/kmod/$basearch/"
+zfs_repo_dkms_baseurl: "http://download.zfsonlinux.org/epel/$releasever/$basearch/"
 
 zfs_packages:
   - kmod-zfs
   - zfs
   - mokutil              # Secure Boot state + MOK enrollment
-  - dnf-plugins-core   # post-transaction-actions hook for re-signing
+  # Provides /etc/dnf/plugins/post-transaction-actions.d for the re-sign hook.
+  - python3-dnf-plugin-post-transaction-actions
 
 # Load the module at boot even before a pool exists.
 zfs_load_module_at_boot: true
