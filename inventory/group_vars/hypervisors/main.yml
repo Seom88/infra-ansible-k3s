@@ -1,0 +1,15 @@
+---
+# libvirt_usb_hotstart vars for aleph (k3s-01)
+# The VM Truenas has two Realtek RTL9201R USB-SATA bridges passed through.
+# Their bus/device numbers change every boot — this role replaces the libvirt
+# autostart with a systemd service that waits for both devices by VID:PID.
+
+libvirt_usb_hotstart_vm: "Truenas"
+
+libvirt_usb_hotstart_devices:
+  - vendor: "0bda"
+    product: "9201"
+    count: 2
+
+libvirt_usb_hotstart_timeout: 60
+libvirt_usb_hotstart_disable_autostart: true

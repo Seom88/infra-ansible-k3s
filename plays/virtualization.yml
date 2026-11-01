@@ -6,3 +6,4 @@
   roles:
     - role: cockpit
     - role: usb_autosuspend
+    - role: libvirt_usb_hotstart

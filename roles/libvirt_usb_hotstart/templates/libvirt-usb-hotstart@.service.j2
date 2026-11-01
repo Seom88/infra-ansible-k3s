@@ -1,0 +1,22 @@
+[Unit]
+Description=USB-gated autostart for libvirt VM %i
+Documentation=https://github.com/your-org/infra-k3s/roles/libvirt_usb_hotstart
+# Start after libvirtd/virtqemud is ready and udev has settled.
+After=virtqemud.service libvirtd.service systemd-udev-settle.service
+Wants=virtqemud.service
+BindsTo=virtqemud.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+EnvironmentFile={{ libvirt_usb_hotstart_script_dir }}/%i.env
+ExecStart={{ libvirt_usb_hotstart_script_dir }}/wait-and-start.sh %i
+SuccessExitStatus=0
+# Self-heal on transient USB enumeration glitches.
+Restart=on-failure
+RestartSec=10s
+StartLimitIntervalSec=120
+StartLimitBurst=3
+
+[Install]
+WantedBy=multi-user.target

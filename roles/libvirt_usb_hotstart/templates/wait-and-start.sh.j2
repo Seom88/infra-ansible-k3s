@@ -1,0 +1,114 @@
+#!/usr/bin/env bash
+# /usr/local/lib/libvirt-usb-hotstart/wait-and-start.sh
+#
+# Wait until all required USB VID:PID devices are visible via lsusb,
+# then remove stale bus/device addresses from the VM XML and start the VM.
+#
+# Usage: wait-and-start.sh <vm-name>
+#   Environment vars (set by the systemd unit via EnvironmentFile):
+#     USB_DEVICES   space-separated list of "vendor:product:count" triplets
+#     WAIT_TIMEOUT  seconds to wait before aborting (default: 60)
+
+set -euo pipefail
+
+VM="${1:?VM name required}"
+TIMEOUT="${WAIT_TIMEOUT:-60}"
+
+log() { echo "$(date --iso-8601=seconds) [usb-hotstart/$VM] $*" >&2; }
+
+# ---------------------------------------------------------------------------
+# 0. Fast-path: if the VM is already running, we are done.
+#    This handles the case where the service is (re)started while the VM is up
+#    (e.g. Ansible apply, manual systemctl restart).
+# ---------------------------------------------------------------------------
+vm_state() { virsh domstate "$VM" 2>/dev/null || echo "undefined"; }
+
+if [[ "$(vm_state)" == "running" ]]; then
+    log "VM is already running — nothing to do"
+    exit 0
+fi
+
+# ---------------------------------------------------------------------------
+# 1. Wait for all required USB devices to appear via lsusb.
+#    lsusb reads /dev/bus/usb and sees devices even when they are under
+#    QEMU passthrough (sysfs idVendor disappears during passthrough, lsusb
+#    reads the raw char devices which remain accessible to root).
+# ---------------------------------------------------------------------------
+wait_for_usb() {
+    local deadline=$(( $(date +%s) + TIMEOUT ))
+
+    while (( $(date +%s) < deadline )); do
+        local all_ready=1
+
+        for entry in $USB_DEVICES; do
+            local vid="${entry%%:*}"
+            local rest="${entry#*:}"
+            local pid="${rest%%:*}"
+            local need="${rest##*:}"
+
+            # lsusb outputs lines like: Bus 002 Device 003: ID 0bda:9201 ...
+            local found
+            found=$(lsusb 2>/dev/null | grep -ci "ID ${vid}:${pid}" || true)
+
+            if (( found < need )); then
+                all_ready=0
+                log "Waiting for USB ${vid}:${pid} (need ${need}, have ${found})"
+                break
+            fi
+        done
+
+        if (( all_ready )); then
+            log "All USB devices present"
+            return 0
+        fi
+
+        sleep 2
+    done
+
+    log "ERROR: Timed out after ${TIMEOUT}s waiting for USB devices"
+    return 1
+}
+
+# ---------------------------------------------------------------------------
+# 2. Update <address bus=… device=…> in the VM XML to match current lsusb.
+#    This overwrites whatever stale addresses were saved from a previous boot.
+# ---------------------------------------------------------------------------
+update_hostdev_addresses() {
+    local script="{{ libvirt_usb_hotstart_script_dir }}/update-xml-addresses.py"
+    log "Updating USB hostdev addresses in VM XML"
+    if python3 "$script" "$VM" 2>&1 | while read -r line; do log "$line"; done; then
+        log "VM XML addresses up to date"
+    else
+        log "WARNING: XML address update failed — libvirt will attempt to find devices by VID:PID anyway"
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# 3. Start the VM
+# ---------------------------------------------------------------------------
+start_vm() {
+    local state
+    state=$(vm_state)
+
+    case "$state" in
+        running)
+            log "VM is already running"
+            ;;
+        "shut off"|crashed|"in shutdown"|paused)
+            log "Starting VM $VM (current state: $state)"
+            virsh start "$VM"
+            log "VM $VM started successfully"
+            ;;
+        *)
+            log "Unexpected VM state '$state' — attempting start anyway"
+            virsh start "$VM"
+            ;;
+    esac
+}
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+wait_for_usb
+update_hostdev_addresses
+start_vm
