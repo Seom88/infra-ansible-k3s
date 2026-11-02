@@ -313,19 +313,24 @@
             mode: "0600"
           register: base_kernel_cmdline_sync
 
-        - name: Confirm every kernel parameter reached the generated GRUB configuration
+        # The role keeps the value a node already has for a managed parameter
+        # (see above), so the check is name-only: the generated configuration
+        # must carry "name=" for every managed parameter, whatever value the
+        # installer chose (e.g. crashkernel=2G-64G:256M,64G-:512M from
+        # crashkernel=auto instead of the role default).
+        - name: Confirm every managed kernel parameter reached the generated GRUB configuration
           ansible.builtin.command:
-            # argv form, not a shell string: the character class contains quotes
-            # that would otherwise break the command module's own parsing.
+            # argv form, not a shell string: the parameter names and values can
+            # contain characters that would otherwise break the module's parsing.
             argv:
               - grep
-              - -oF
+              - -oE
               - --
-              - "{{ item.name }}={{ item.value }}"
+              - "{{ item.name }}=[^ ]+"
               - "{{ base_grub_config_file }}"
           loop: "{{ base_kernel_params }}"
           loop_control:
-            label: "{{ item.name }}={{ item.value }}"
+            label: "{{ item.name }}"
           register: base_kernel_params_verify
           changed_when: false
 
