@@ -232,8 +232,7 @@
         # handed to lineinfile as the replacement line. No backrefs are used on
         # purpose: lineinfile expands \1 followed by a digit as a group number, so a
         # value like 0bda:9201:k would silently corrupt the line. Rebuilding the
-        # value also keeps the role idempotent when the parameter is already set,
-        # because lineinfile reports no change when the line already matches.
+        # value also keeps the role idempotent when the parameters already match.
         - name: Record the current kernel command line tokens
           ansible.builtin.set_fact:
             base_grub_cmdline_current: >-
@@ -241,20 +240,36 @@
                   | regex_findall('^GRUB_CMDLINE_LINUX="([^"]*)"', multiline=True) | first
                  | default('', true) | split()) }}
 
-        # A parameter already present is kept at the position and value it has, so
-        # a node where the quirk was added by hand is not rewritten differently.
-        - name: Record the kernel command line with every managed parameter added
+        # Managed parameters are authoritative: an existing token for a managed
+        # name is replaced in place (all tokens of that name, since crashkernel
+        # uses two), while unmanaged tokens keep their position and value. This
+        # is what turns a wrong installer value such as the Anaconda range
+        # syntax into the configured crashkernel=...,high / ...,low pair.
+        - name: Record the kernel command line with every managed parameter set
           ansible.builtin.set_fact:
             base_grub_cmdline: >-
-              {%- set existing = base_grub_cmdline_current -%}
-              {%- set present = existing | map('regex_replace', '=.*$', '') | list -%}
-              {%- set missing = base_kernel_params
-                    | rejectattr('name', 'in', present) | list -%}
-              {%- set additions = [] -%}
-              {%- for p in missing -%}
-              {%- set _ = additions.append(p.name ~ '=' ~ p.value) -%}
+              {%- set managed = base_kernel_params | map(attribute='name') | list -%}
+              {%- set result = [] -%}
+              {%- set placed = [] -%}
+              {%- for token in base_grub_cmdline_current -%}
+              {%-   set token_name = token.split('=')[0] -%}
+              {%-   if token_name in managed -%}
+              {%-     if token_name not in placed -%}
+              {%-       set _ = placed.append(token_name) -%}
+              {%-       for param in base_kernel_params if param.name == token_name -%}
+              {%-         set _ = result.append(param.name ~ '=' ~ param.value) -%}
+              {%-       endfor -%}
+              {%-     endif -%}
+              {%-   else -%}
+              {%-     set _ = result.append(token) -%}
+              {%-   endif -%}
               {%- endfor -%}
-              {{ (existing + additions) | join(' ') | trim }}
+              {%- for param in base_kernel_params -%}
+              {%-   if param.name not in placed -%}
+              {%-     set _ = result.append(param.name ~ '=' ~ param.value) -%}
+              {%-   endif -%}
+              {%- endfor -%}
+              {{ result | join(' ') | trim }}
 
         - name: Detect whether BLS snippets are in use on this node
           ansible.builtin.stat:
@@ -291,18 +306,31 @@
             src: "{{ base_kernel_cmdline_file }}"
           register: base_kernel_cmdline_raw
 
-        - name: Record the kernel cmdline file tokens with every managed parameter added
+        - name: Record the kernel cmdline file tokens with every managed parameter set
           ansible.builtin.set_fact:
             base_kernel_cmdline_new: >-
-              {%- set existing = base_kernel_cmdline_raw.content | b64decode | split() -%}
-              {%- set present = existing | map('regex_replace', '=.*$', '') | list -%}
-              {%- set missing = base_kernel_params
-                    | rejectattr('name', 'in', present) | list -%}
-              {%- set additions = [] -%}
-              {%- for p in missing -%}
-              {%- set _ = additions.append(p.name ~ '=' ~ p.value) -%}
+              {%- set managed = base_kernel_params | map(attribute='name') | list -%}
+              {%- set result = [] -%}
+              {%- set placed = [] -%}
+              {%- for token in base_kernel_cmdline_raw.content | b64decode | split() -%}
+              {%-   set token_name = token.split('=')[0] -%}
+              {%-   if token_name in managed -%}
+              {%-     if token_name not in placed -%}
+              {%-       set _ = placed.append(token_name) -%}
+              {%-       for param in base_kernel_params if param.name == token_name -%}
+              {%-         set _ = result.append(param.name ~ '=' ~ param.value) -%}
+              {%-       endfor -%}
+              {%-     endif -%}
+              {%-   else -%}
+              {%-     set _ = result.append(token) -%}
+              {%-   endif -%}
               {%- endfor -%}
-              {{ (existing + additions) | join(' ') | trim }}
+              {%- for param in base_kernel_params -%}
+              {%-   if param.name not in placed -%}
+              {%-     set _ = result.append(param.name ~ '=' ~ param.value) -%}
+              {%-   endif -%}
+              {%- endfor -%}
+              {{ result | join(' ') | trim }}
 
         - name: Keep the kernel cmdline file in sync with the GRUB defaults file
           ansible.builtin.copy:
@@ -313,24 +341,21 @@
             mode: "0600"
           register: base_kernel_cmdline_sync
 
-        # The role keeps the value a node already has for a managed parameter
-        # (see above), so the check is name-only: the generated configuration
-        # must carry "name=" for every managed parameter, whatever value the
-        # installer chose (e.g. crashkernel=2G-64G:256M,64G-:512M from
-        # crashkernel=auto instead of the role default).
+        # Managed parameters are set, not merely appended, so the generated
+        # configuration must carry the exact "name=value" token for each one.
         - name: Confirm every managed kernel parameter reached the generated GRUB configuration
           ansible.builtin.command:
             # argv form, not a shell string: the parameter names and values can
             # contain characters that would otherwise break the module's parsing.
             argv:
               - grep
-              - -oE
+              - -oF
               - --
-              - "{{ item.name }}=[^ ]+"
+              - "{{ item.name }}={{ item.value }}"
               - "{{ base_grub_config_file }}"
           loop: "{{ base_kernel_params }}"
           loop_control:
-            label: "{{ item.name }}"
+            label: "{{ item.name }}={{ item.value }}"
           register: base_kernel_params_verify
           changed_when: false
 

@@ -41,12 +41,22 @@ base_tailscale_sysctl_file: /etc/sysctl.d/99-tailscale.conf
 # /etc/default/grub (GRUB_CMDLINE_LINUX) and /etc/kernel/cmdline so the
 # value survives a BLS migration or the next kernel upgrade.
 #
-# crashkernel reserves memory for the kdump capture kernel. Without it the
-# running kernel cannot start kdump, and Cockpit's Kernel dump page raises the
-# danger alert "El kernel no arrancó con la opción crashkernel". A node
-# installed with the Anaconda default (crashkernel=auto) already carries an
-# expanded value such as 2G-64G:256M,64G-:512M; the role keeps whatever value
-# is already present instead of rewriting it.
+# crashkernel reserves memory for the kdump capture kernel. Cockpit's Kernel
+# dump page raises the danger alert "El kernel no arrancó con la opción
+# crashkernel" and kdump.service fails with "No memory reserved for crash
+# kernel" when the reservation is missing.
+#
+# This node exposes only ~470 MB of usable RAM below 4G (firmware and the
+# Intel graphics aperture consume the rest). With the Anaconda range syntax
+# (crashkernel=2G-64G:256M,64G-:512M) the kernel reserves the region above 4G,
+# then fails to find the automatic 256 MB low reservation, frees the high
+# region again and leaves /sys/kernel/kexec_crash_size at 0. Use the explicit
+# high/low form instead: 512M above 4G and no low reservation.
+#
+#   crashkernel=512M,high crashkernel=0,low
+#
+# Both tokens are managed together because the kernel parses `,high` and
+# `,low` as an alternative to the range syntax, not as a complement to it.
 #
 # usbcore.quirks=0bda:9201:k disables USB Link Power Management for the
 # Realtek RTL9201R USB-SATA bridge. On this node the kernel repeatedly logs
@@ -56,7 +66,9 @@ base_tailscale_sysctl_file: /etc/sysctl.d/99-tailscale.conf
 # other USB device. Empty the list to stop managing the kernel command line.
 base_kernel_params:
   - name: crashkernel
-    value: "512M"
+    value: "512M,high"
+  - name: crashkernel
+    value: "0,low"
   - name: usbcore.quirks
     value: "0bda:9201:k"
 
