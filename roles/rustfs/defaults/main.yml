@@ -19,3 +19,5 @@ rustfs_health_timeout: 10s
 rustfs_health_retries: 3
 rustfs_health_start_period: 40s
 rustfs_tailscale_health_wait_seconds: 180
+# systemd's 90 s default is too short for a cold start (image pull, slow disk).
+rustfs_start_timeout: 300

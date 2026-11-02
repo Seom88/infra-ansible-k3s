@@ -127,8 +127,9 @@
 - name: Reload systemd and generate Quadlet units
   ansible.builtin.meta: flush_handlers
 
-- name: Enable and start RustFS (Podman Quadlet)
+- name: Start RustFS (Podman Quadlet)
   ansible.builtin.systemd:
     name: rustfs.service
-    enabled: true
     state: started
+  # Do not set enabled: true: Quadlet units are transient ("generated") and
+  # `systemctl enable` fails. The generator applies [Install] WantedBy= itself.

@@ -195,12 +195,19 @@ ansible-playbook plays/nas.yml --check --diff   # see the plan first
 ansible-playbook plays/nas.yml
 ```
 
-Aleph's existing `Data` mirror is configured under `zfs_import_pools` in
-`inventory/group_vars/nas/main.yml`, with both member partition paths. The role
-checks those stable paths and imports only the named pool (with `-f`, because it
-was last accessed by the TrueNAS VM); it does not create or format the disks.
-Inspect the pool and its datasets after import before adding any dataset or
-mountpoint declarations.
+Aleph's existing `Data` mirror is listed under `zfs_import_pools`,
+identified by an attribute of the drive itself: `ata-<MODEL>_<SERIAL>` or
+`wwn-0x...`. Do not use the `usb-*` names: both USB-SATA bridges report the same
+generic serial, so those depend on the model string and the port.
+
+ZFS members carry raw ZFS labels, not `blkid` UUIDs; a vdev is identified by the
+GUIDs in its label (`zdb -l /dev/sdb1` prints them). Import scans
+`/dev/disk/by-id` and matches those GUIDs, so a renamed device does not break
+it: the configured paths are an existence guard and the path recorded in
+`zpool status` is only a hint. The role imports only the named pool (with `-f`,
+because it was last accessed by the TrueNAS VM) and never creates or formats
+disks. Inspect the pool and its datasets after import before declaring any
+dataset or mountpoint.
 
 For Aleph, the pool uses native ZFS encryption (`aes-256-gcm`, `keyformat=hex`).
 Keep the exported `Data` key as the `zfs_dataset_key` variable in the locally
@@ -241,6 +248,26 @@ Quadlet shares the pod network between `rustfs-ts` and `rustfs`; only UDP
 while the existing Serve configuration proxies to ports 9000 and 9001. Existing data at `/Data/Docker/rustfs/data` is reused,
 not erased. Podman healthchecks with systemd restart unhealthy containers,
 replacing the Compose `autoheal` sidecar.
+
+Boot chain: `zfs-import-cache` → `zfs-unlock-pool` → `zfs-mount` → `rustfs-pod`
+→ `rustfs-ts` → `rustfs`. The pod unit `Requires=zfs-unlock-pool.service`; each
+container unit orders itself after the mount of its volumes. Nothing runs
+`systemctl enable`: Quadlet regenerates the transient units from
+`/etc/containers/systemd` and applies their `[Install] WantedBy=` on every boot.
+
+#### `rustfs.service` fails at boot with `result 'timeout'`
+
+Quadlet starts the container with `podman run`. Mounting the data volume with
+`:Z` made Podman relabel the whole dataset (>100k files on USB HDDs) on every
+start, exceeding systemd's default `TimeoutStartSec=90 s`; `ExecStopPost` then
+removed the container while `Restart=always` retried, so `podman ps` was empty
+and the Tailscale sidecar logged `connection refused` on 127.0.0.1:9000.
+
+The volume is mounted without `:Z`, the container runs with
+`SecurityLabelDisable=true` (it is the only writer), and both units set
+`TimeoutStartSec` to `rustfs_start_timeout` (300 s). Restart `rustfs-ts.service`
+and `rustfs.service` after applying, or reboot to exercise the real boot path.
+Delete stale `*.bak` files in `/etc/containers/systemd`.
 
 ### Enroll the signing key (manual, once)
 

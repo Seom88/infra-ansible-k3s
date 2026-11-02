@@ -23,6 +23,7 @@ HealthOnFailure=kill
 [Service]
 Restart=always
 RestartSec=5s
+TimeoutStartSec={{ rustfs_start_timeout }}
 
 [Install]
 WantedBy=multi-user.target

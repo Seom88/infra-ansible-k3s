@@ -221,8 +221,8 @@ sidecar, without adding a Docker daemon.
 | **Secrets** | `rustfs_ts_authkey`, `rustfs_access_key`, and `rustfs_secret_key` from the ignored Ansible Vault file; deployed only as root-owned `0600` env files with task output/diff suppressed |
 | **Tailscale** | `/dev/net/tun`, `NET_ADMIN`, `NET_RAW`, kernel networking, UDP 41642 by default (distinct from the host's Tailscale UDP 41641); existing `config/serve.json` is preserved and mounted read-only |
 | **Health/recovery** | Podman healthchecks; unhealthy containers are killed and systemd restarts their Quadlet services, replacing the Docker autoheal container |
-| **SELinux** | bind mounts use private `:Z` labels; existing directory ownership is preserved |
-| **Initial start** | systemd startup timeout is unbounded because Podman must recursively SELinux-label the existing data tree on first use |
+| **SELinux** | Tailscale state/config keep private `:Z` labels; the RustFS data mount disables label separation (`SecurityLabelDisable`) so Podman does not relabel 100k+ dataset files on every start |
+| **Start timeout** | `TimeoutStartSec={{ rustfs_start_timeout }}` (300 s), above systemd's 90 s default for cold starts |
 
 The role does not install Docker or `podman-compose`; Quadlet lets systemd
 manage the containers directly. It remains disabled until credentials are
