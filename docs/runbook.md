@@ -317,7 +317,17 @@ Apply:
    ```bash
    ansible-playbook plays/virtualization.yml --tags usb_autosuspend
    ```
-   or wire it in `roles:` on hypervisors and rerun `site.yml`.
+   or rerun `site.yml`; the role is part of the virtualization play.
+   Verify the live setting, not just the file:
+   ```bash
+   for d in /sys/bus/usb/devices/*; do
+     [ -r "$d/idVendor" ] || continue
+     [ "$(cat "$d/idVendor"):$(cat "$d/idProduct")" = 0bda:9201 ] || continue
+     echo "$d control=$(cat "$d/power/control")"
+   done
+   ```
+   The role now fails the play if an attached bridge still reports
+   `power/control=auto` after reloading and triggering udev.
 3. Move the enclosures to a real USB 3 port (5000M+) and give them dedicated
    power — a shared low-current bus is the most common root cause.
 4. If UAS still resets, force Bulk-Only Transport inside the VM and on the host:
@@ -325,3 +335,25 @@ Apply:
 
 The existing `usbcore.quirks=0bda:9201:k` cmdline entry only disables Link
 Power Management (`k`); it does not address UAS or autosuspend.
+
+#### `usb usbN-portN: Cannot enable. Maybe the USB cable is bad?`
+
+This loop is a **USB link-training/power failure**, not autosuspend and not a
+ZFS naming problem. The bridge never enumerates, so no `/dev/disk/by-id` path
+exists and `zpool` cannot open or online the member. Typical causes, in order:
+
+1. Cable or connector (the kernel says it explicitly; swap the cable first).
+2. Port or hub: try a different root port, avoid unpowered hubs, and check
+   whether the device negotiated 5000M or fell back to 480M with `lsusb -t`.
+3. Enclosure power: two 2.5" HDDs on bus power can brown out at spin-up; use a
+   powered hub or an enclosure with its own supply.
+4. Only after the disk appears in `lsblk`/`/dev/disk/by-id`, bring the vdev
+   back with `zpool online <pool> <vdev-or-guid>`. If the label is invalid,
+   `zpool replace` is required; never recreate the pool.
+
+On Aleph (2026-11-03) the HGST member failed to enable for ~9 minutes after
+boot, then enumerated at 480M, came back ONLINE and resilvered 129M
+automatically. The pool was never misnamed: `wwn-*`, `ata-*` and `usb-*`
+aliases all point at the same two disks. The role now also tries
+`zpool online` for UNAVAIL members and fails the play if the pool is still not
+ONLINE, so a lost mirror cannot pass silently.

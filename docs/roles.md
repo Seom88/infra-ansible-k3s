@@ -198,7 +198,8 @@ group so k3s-only nodes never install it.
 | **Packages** | `kmod-zfs`, `zfs`, `mokutil`, `python3-dnf-plugin-post-transaction-actions`; `kernel-devel-<running>` for `sign-file` |
 | **Secure Boot** | generates `/var/lib/zfs-mok/{MOK.priv,MOK.der}` and signs every ZFS module; **enrolling the MOK and rebooting is manual** (see runbook) |
 | **Re-sign** | dnf `post-transaction-actions` hook on `kernel*` / `kmod-zfs*` |
-| **Pools** | `zfs_import_pools` imports named existing pools without creating/formatting; `zfs_pools` creates only explicitly configured new pools. Both require existing `/dev/disk/by-id/...` paths; `zfs_import_all` is off by default |
+| **Pools** | `zfs_import_pools` imports named existing pools without creating/formatting; `zfs_pools` creates only explicitly configured new pools. Import `devices` are label-scanned hints and may be absent (degraded mirror); creation devices must all exist. Both require `/dev/disk/by-id/...` paths; `zfs_import_all` is off by default |
+| **Degraded recovery** | `zfs_auto_online` (default true) runs `zpool online` on every UNAVAIL member that ZFS can see again; `zfs_require_healthy` (default true) fails the play with the disk/replace diagnosis if a configured pool is still not ONLINE |
 | **Datasets** | optional `zfs_datasets` with ZFS properties |
 | **Encrypted import** | optional Vault variable `zfs_dataset_key` is installed root-only; a systemd oneshot loads the key and mounts datasets after pool import and before `zfs-mount.service` |
 | **Scrub** | `zfs-scrub.timer`, `zfs_scrub_calendar` (Sun 03:00), `Persistent=true`; skips a running scrub and journals `zpool status -x` |
@@ -236,11 +237,12 @@ hypervisors that USB-pass them through to TrueNAS.
 
 | | |
 | --- | --- |
-| **Runs on** | hypervisors (`virtualization` play, optional) |
+| **Runs on** | hypervisors (`virtualization` play, tagged `usb_autosuspend` for targeted runs) |
 | **Switch** | `usb_autosuspend_enabled` (default **true**) |
 | **What it installs** | `/etc/udev/rules.d/51-usb-autosuspend.rules` (`power/control=on`, `power/autosuspend_delay_ms=-1`) and `/etc/modprobe.d/50-usb-rtl9201.conf` (`usb-storage quirks=...:u`) |
 | **Intent** | keep the bridges powered at idle and avoid UAS-related resets that break the QEMU `usb-host` path mapping (`device undefined bus undefined`) |
-| **Apply at runtime** | reboot or `udevadm trigger --subsystem-match=usb`; the modprobe drop-in takes effect on the next `usb-storage` module load |
+| **Apply at runtime** | reload + `udevadm trigger --action=change --subsystem-match=usb`; the role then reads every attached bridge's sysfs `power/control` and fails if it is still `auto`. The modprobe drop-in takes effect on the next `usb-storage` module load (reboot; never reload it under mounted disks) |
+| **Not a fix for** | `Cannot enable. Maybe the USB cable is bad?` — that is a physical link/power failure (cable, port, unpowered hub, enclosure supply), not autosuspend |
 
 The role does not remove the host's `usbcore.quirks` entry for `0bda:9201:k`,
 which only disables Link Power Management. Keep it; the two settings are complementary.

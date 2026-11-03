@@ -11,8 +11,9 @@ usb_autosuspend_vendors:
 usb_autosuspend_power_control: "on"
 usb_autosuspend_delay_ms: "-1"
 
-# Default UAS quirks issued through modprobe; note kernel-built-in (non-module)
-# kernels still need the same value through /etc/modprobe.d or cmdline.
+# Force Bulk-Only Transport instead of UAS through a modprobe drop-in. The
+# quirk is read when usb-storage loads, so an already-bound UAS device needs a
+# reboot to switch transports (never reload the module under mounted disks).
 usb_autosuspend_disable_uas: true
 usb_autosuspend_modprobe_file: "/etc/modprobe.d/50-usb-rtl9201.conf"
 

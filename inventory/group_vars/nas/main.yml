@@ -6,14 +6,17 @@ zfs_enabled: true
 
 # Existing mirror previously used by the TrueNAS VM. Import it on the host;
 # do not create a new pool or format these disks.
-# Use the drives' own IDs (`ata-*`, `wwn-*`), not `usb-*`: both USB bridges
-# share the same serial. Import matches ZFS label GUIDs, not these paths.
+# These are hints for the preflight check only: ZFS matches the pool members by
+# the GUIDs in their own labels, not by these paths (see `zpool status -g` and
+# `zdb -l`). Both USB-SATA bridges report the same generic serial, but the
+# drives do expose their own WWN over the bridge, so prefer `wwn-*` over
+# `usb-*`: the WWN comes from the drive, not from the adapter.
 zfs_import_pools:
   - name: Data
     force: true  # ZFS reports it was last accessed from another system (the VM).
     devices:
-      - /dev/disk/by-id/ata-HGST_HTS541010B7E610_WXN1A87NX5AZ-part1
-      - /dev/disk/by-id/ata-TOSHIBA_MQ01ABD100_X76PPRDDT-part1
+      - /dev/disk/by-id/wwn-0x50014ee65d873771-part1   # HGST HTS541010B7E610
+      - /dev/disk/by-id/wwn-0x5000039812d824a4-part1   # TOSHIBA MQ01ABD100
 
 # Data is natively encrypted (AES-256-GCM); keyformat was verified as hex.
 # The secret zfs_dataset_key is defined only in the encrypted vault.yml.

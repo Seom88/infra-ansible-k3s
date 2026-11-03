@@ -195,25 +195,40 @@
   changed_when: false
   failed_when: false
 
-- name: Verify every configured pool device exists
+# Only `zpool create` needs every device to be present up front. Import hints
+# are intentionally allowed to be absent: a mirror with one disk unplugged is
+# still importable and must not be blocked (or, worse, recreated).
+- name: Verify every device for a pool to be created exists
   ansible.builtin.stat:
     path: "{{ item.1 }}"
-  loop: "{{ (zfs_pools + zfs_import_pools) | subelements('devices', skip_missing=True) }}"
+  loop: "{{ zfs_pools | subelements('devices', skip_missing=True) }}"
   register: zfs_pool_devices
-  when: zfs_pools | length > 0 or zfs_import_pools | length > 0
+  when: zfs_pools | length > 0
 
-- name: Refuse pool operations from missing or non-by-id devices
+- name: Refuse to create pools from missing or non-by-id devices
   ansible.builtin.assert:
     that:
       - item.stat.exists
       - "'/dev/disk/by-id/' in item.item.1"
     fail_msg: >-
-      Pool device {{ item.item.1 }} is missing or does not use a
-      /dev/disk/by-id/ path. Stable paths are mandatory: /dev/sdX changes
-      across boots and USB re-enumeration.
+      Device {{ item.item.1 }} for new pool {{ item.item.0.name }} is missing
+      or does not use a /dev/disk/by-id/ path. Refusing to run `zpool create`:
+      /dev/sdX changes across boots and USB re-enumeration.
   loop: "{{ zfs_pool_devices.results | default([]) }}"
   loop_control:
     label: "{{ item.item.1 }}"
+
+- name: Refuse import hints that are not stable by-id paths
+  ansible.builtin.assert:
+    that:
+      - "'/dev/disk/by-id/' in item.1"
+    fail_msg: >-
+      Import hint {{ item.1 }} for pool {{ item.0.name }} does not use a
+      /dev/disk/by-id/ path. Use a stable name, never /dev/sdX.
+  loop: "{{ zfs_import_pools | subelements('devices', skip_missing=True) }}"
+  loop_control:
+    label: "{{ item.1 }}"
+  when: zfs_import_pools | length > 0
 
 - name: Import pools that exist on disk but are not imported
   ansible.builtin.command:
@@ -347,6 +362,64 @@
   loop_control:
     label: "{{ item.name }}"
   when: item.name not in (zfs_existing_datasets.stdout_lines | default([]))
+
+# --- Degraded-pool recovery ---------------------------------------------------
+# A USB disk re-enumerated after boot shows up in /dev/disk/by-id again, but
+# ZFS keeps the old vdev UNAVAIL until it is explicitly onlined. Do that here,
+# then fail loud if redundancy is still missing.
+- name: Collect the configured pool names
+  ansible.builtin.set_fact:
+    zfs_configured_pool_names: >-
+      {{ (zfs_import_pools | map(attribute='name') | list)
+         + (zfs_pools | map(attribute='name') | list) }}
+
+- name: Find unavailable members of the configured pools
+  ansible.builtin.shell:
+    cmd: "zpool status -g -P {{ item }} | awk '$2 == \"UNAVAIL\" { print $1 }'"
+  loop: "{{ zfs_configured_pool_names }}"
+  register: zfs_unavailable_members
+  changed_when: false
+  failed_when: false
+  when: zfs_configured_pool_names | length > 0
+
+- name: Bring unavailable members back online when the kernel sees them again
+  ansible.builtin.command:
+    cmd: "zpool online {{ item.0.item }} {{ item.1 }}"
+  loop: >-
+    {{ zfs_unavailable_members.results | default([])
+       | subelements('stdout_lines', skip_missing=True) }}
+  loop_control:
+    label: "{{ item.0.item }} {{ item.1 }}"
+  register: zfs_online_attempts
+  changed_when: zfs_online_attempts.rc == 0
+  failed_when: false
+  when: zfs_auto_online | bool
+
+- name: Read the health of each configured pool
+  ansible.builtin.command:
+    cmd: "zpool list -H -o health {{ item }}"
+  loop: "{{ zfs_configured_pool_names }}"
+  register: zfs_pool_health
+  changed_when: false
+  failed_when: false
+  when: zfs_configured_pool_names | length > 0
+
+- name: Require every configured pool to be ONLINE
+  ansible.builtin.assert:
+    that:
+      - item.stdout | trim == 'ONLINE'
+    fail_msg: >-
+      Pool {{ item.item }} is {{ item.stdout | trim }}, not ONLINE, and could
+      not be recovered automatically. The role only onlines members ZFS
+      already knows; it never replaces or formats a device. Check that the
+      disk is physically attached (`lsblk -o NAME,SERIAL,MODEL,TRAN`,
+      `dmesg -T | tail`) and inspect `zpool status -v {{ item.item }}`. If the
+      label is invalid, replace the member explicitly with
+      `zpool replace {{ item.item }} <old-vdev> <new-by-id-path>`.
+  loop: "{{ zfs_pool_health.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: zfs_require_healthy | bool
 
 # --- Scheduled scrub ----------------------------------------------------------
 - name: Refuse an unparseable scrub calendar

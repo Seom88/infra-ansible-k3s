@@ -6,3 +6,5 @@
   roles:
     - role: cockpit
     - role: usb_autosuspend
+      tags:
+        - usb_autosuspend

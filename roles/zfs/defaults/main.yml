@@ -91,6 +91,17 @@ zfs_key_file: "/root/.config/zfs/{{ zfs_key_dataset }}.key"
 # NAS node should import its own pools, never a stray disk left attached.
 zfs_import_all: false
 
+# After import, ask ZFS to online members that are UNAVAIL because the kernel
+# re-enumerated them late (USB disks often appear after zfs-import-cache).
+# This only re-enables vdevs ZFS already knows by GUID; it never creates,
+# replaces, clears or formats a device, and a still-absent disk is left alone.
+zfs_auto_online: true
+
+# Fail the play when a configured pool is not ONLINE after the recovery
+# attempt. Turning this off keeps a degraded pool from blocking unrelated
+# configuration, at the cost of no longer failing loud on lost redundancy.
+zfs_require_healthy: true
+
 # --- Scrub -------------------------------------------------------------------
 zfs_scrub_enabled: true
 zfs_scrub_calendar: "Sun *-*-* 03:00:00"

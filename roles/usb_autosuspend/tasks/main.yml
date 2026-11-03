@@ -1,7 +1,6 @@
 ---
 # udev rule that keeps USB attached Realtek RTL9201R devices on and
-# exempt from aggressive autosuspend (which otherwise cut TrueNAS passthrough
-# links when idle).
+# exempt from aggressive autosuspend (which otherwise cuts storage links).
 - name: Render USB autosuspend udev rule
   ansible.builtin.template:
     src: udev.rules.j2
@@ -12,6 +11,9 @@
   when: usb_autosuspend_enabled | bool
 
 # Disable UAS for the RTL9201R bridges so they stay on bulk-only transport.
+# This drop-in is consumed when usb-storage loads, so it needs a reboot (or a
+# deliberate module reload, which would interrupt mounted disks) to take
+# effect if UAS is already bound.
 - name: Render modprobe drop-in for RTL9201R UAS quirk
   ansible.builtin.template:
     src: modprobe.conf.j2
@@ -30,12 +32,60 @@
     - usb_autosuspend_udev_rules_reload | bool
   run_once: false
 
-# A live trigger does not always catch devices already under host control, but
-# at least gets the steady state consistent on next enumeration.
+# The default action is "change", which the rule matches. This also repairs
+# devices that were already attached when the rule was installed.
 - name: Trigger udev rules for present USB subsystem
-  ansible.builtin.command: udevadm trigger --subsystem-match={{ usb_autosuspend_udev_rules_trigger }}
-  changed_when: true
+  ansible.builtin.command:
+    cmd: udevadm trigger --action=change --subsystem-match={{ usb_autosuspend_udev_rules_trigger }}
+  changed_when: false
   failed_when: false
   when:
     - usb_autosuspend_enabled | bool
     - usb_autosuspend_udev_rules_trigger is not none
+
+# Installing the rule is not the same as it being in effect: verify the
+# runtime sysfs values for every matching bridge that is attached right now.
+- name: Read the runtime power settings of attached bridges
+  ansible.builtin.shell:
+    executable: /bin/bash
+    cmd: |
+      set -u
+      vendors="{{ usb_autosuspend_vendors | join(' ') }}"
+      found=0
+      bad=0
+      for dev in /sys/bus/usb/devices/*; do
+          [[ -r "$dev/idVendor" && -r "$dev/idProduct" ]] || continue
+          pair="$(cat "$dev/idVendor"):$(cat "$dev/idProduct")"
+          case " $vendors " in
+              *" $pair "*) ;;
+              *) continue ;;
+          esac
+          found=1
+          control="$(cat "$dev/power/control" 2>/dev/null || echo missing)"
+          delay="$(cat "$dev/power/autosuspend_delay_ms" 2>/dev/null || echo missing)"
+          echo "$(basename "$dev") $pair control=$control delay=$delay"
+          [[ "$control" == "{{ usb_autosuspend_power_control }}" ]] || bad=1
+      done
+      (( found == 1 )) || echo "no matching bridge attached right now"
+      (( bad == 0 ))
+  register: usb_autosuspend_runtime
+  changed_when: false
+  failed_when: false
+  when: usb_autosuspend_enabled | bool
+
+- name: Fail when a bridge is still autosuspended
+  ansible.builtin.assert:
+    that:
+      - usb_autosuspend_runtime.rc | default(0) == 0
+    fail_msg: >-
+      The udev rule is installed but the live power settings are wrong:
+      {{ usb_autosuspend_runtime.stdout | default('') }}
+      Re-run the trigger or reboot. Check that
+      {{ usb_autosuspend_udev_rules_file }} exists and that
+      `udevadm control --reload-rules` succeeded.
+  when: usb_autosuspend_enabled | bool
+
+- name: Report the bridge power state
+  ansible.builtin.debug:
+    msg: "{{ usb_autosuspend_runtime.stdout_lines | default([]) }}"
+  when: usb_autosuspend_enabled | bool
