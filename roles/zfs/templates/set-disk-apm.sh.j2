@@ -1,0 +1,38 @@
+#!/bin/bash
+# Managed by Ansible (roles/zfs). Keep the ZFS pool disks from spinning down.
+# Called by 99-zfs-disk-apm.rules with the newly-added whole disk as $1, or
+# without arguments by the role to converge the disks that are present now.
+set -u
+
+level="{{ zfs_disk_apm_level }}"
+standby="{{ zfs_disk_standby_timeout }}"
+devices=(
+{% for device in zfs_apm_devices %}
+  {{ device | quote }}
+{% endfor %}
+)
+
+if [ "${devices[*]:-}" = "" ]; then
+    exit 0
+fi
+
+target="${1:-}"
+
+for dev in "${devices[@]}"; do
+    if [ -n "$target" ]; then
+        [ -e "$dev" ] || continue
+        # udev hands us /dev/sdX; the configured path is the stable /dev/disk/by-id
+        # alias. Resolve both so a renamed device still matches the right disk.
+        if [ "$(/usr/bin/readlink -f "$dev")" != "$(/usr/bin/readlink -f "$target")" ]; then
+            continue
+        fi
+    fi
+
+    if [ ! -e "$dev" ]; then
+        [ -n "$target" ] || echo "zfs-disk-apm: $dev is not present; skipping" >&2
+        continue
+    fi
+
+    /usr/sbin/hdparm -B "$level" -S "$standby" "$dev" >/dev/null || \
+        echo "zfs-disk-apm: hdparm failed for $dev" >&2
+done

@@ -5,7 +5,8 @@ galaxy_info:
   description: >
     OpenZFS on AlmaLinux hosts that own NAS disks: kABI-tracking kmods, local
     MOK generation and module signing (Secure Boot), mirror pools from
-    /dev/disk/by-id, datasets and a scheduled scrub.
+    /dev/disk/by-id, degraded-member recovery, APM/standby control for USB
+    disks, datasets and a scheduled scrub.
   min_ansible_version: "2.14"
 
 dependencies: []

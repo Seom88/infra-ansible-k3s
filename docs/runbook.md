@@ -225,6 +225,36 @@ both it and the original TrueNAS key export. The pool key is necessarily present
 in plaintext on Aleph for unattended unlock, so root access to Aleph grants
 access to the data.
 
+### Journal persistence and disk power management
+
+Two host settings make a USB-disk failure diagnosable and less likely to repeat.
+`base` keeps the systemd journal across reboots, and `zfs` keeps the pool disks
+spinning:
+
+```bash
+# The inventory host is also in the `nas` group, so both plays load the
+# encrypted nas vault and need the Vault password even for the base play.
+ansible-playbook plays/base.yml --ask-vault-pass   # /var/log/journal + Storage=persistent
+ansible-playbook plays/nas.yml --ask-vault-pass    # hdparm APM 254 / standby off + udev rule
+```
+
+Verify the live state, not only the files:
+
+```bash
+journalctl --list-boots | tail -5
+sudo hdparm -B /dev/sdX | grep APM_level
+cat /etc/udev/rules.d/99-zfs-disk-apm.rules
+```
+
+`zfs_disk_apm_enabled` (default true) installs
+`/usr/local/lib/zfs/set-disk-apm.sh` and a udev rule. The script resolves the
+stable `/dev/disk/by-id/wwn-*` paths, so it still matches after the kernel
+renames `sdX`; it runs when the disk is added, including a late USB enumeration.
+APM 254 keeps the heads loaded and standby timeout 0 disables standby. This
+avoids the spin-up current spike that can retrain or drop a bus-powered USB
+link. It is a mitigation, not a substitute for a good cable, a USB 3 port with
+enough power, or a powered hub/enclosure.
+
 ### RustFS with Podman
 
 RustFS is configured as a host service using Podman Quadlet (no Docker daemon or
@@ -357,3 +387,19 @@ automatically. The pool was never misnamed: `wwn-*`, `ata-*` and `usb-*`
 aliases all point at the same two disks. The role now also tries
 `zpool online` for UNAVAIL members and fails the play if the pool is still not
 ONLINE, so a lost mirror cannot pass silently.
+
+On Aleph (2026-11-10) the same port logged **1,741** `Cannot enable` retries
+from 09:03 until 11:01. The HGST did not enumerate at boot; the pool imported
+at 09:04 with only the Toshiba and ran degraded for two hours. At 11:01 the
+HGST appeared as `usb 1-4` at 480M (device number 21), ZFS auto-onlined it and
+resilvered 244M. The Toshiba then reported 58.1K checksum errors and 12K
+`ereport.fs.zfs.data` events; no permanent data errors remained. `zpool clear`
+returned the pool to ONLINE and a scrub was started. Both disks were still in
+standby despite being idle, so the role now sets APM 254 and disables standby
+(see [Journal persistence and disk power management](#journal-persistence-and-disk-power-management)).
+The journal was volatile until that day; it is now persistent so the next cold
+boot leaves evidence.
+
+If the retries persist after replacing the cable and moving to a rear USB 3
+port, replace the enclosure/bridge or move the disk to SATA: the Realtek
+RTL9201R is the common element in both disks' failures.

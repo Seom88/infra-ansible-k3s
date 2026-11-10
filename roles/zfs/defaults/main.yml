@@ -102,6 +102,16 @@ zfs_auto_online: true
 # configuration, at the cost of no longer failing loud on lost redundancy.
 zfs_require_healthy: true
 
+# --- Disk power management ---------------------------------------------------
+# Keep the pool disks spinning. A 2.5" USB HDD draws a large inrush current
+# when it spins up; on this NAS that retrains/drops the USB link and leaves the
+# pool degraded. APM 254 keeps the heads loaded and a standby timeout of 0
+# disables standby. The role deploys a udev rule so a disk that enumerates late
+# (or after a warm replug) gets the setting without waiting for a playbook run.
+zfs_disk_apm_enabled: true
+zfs_disk_apm_level: 254
+zfs_disk_standby_timeout: 0
+
 # --- Scrub -------------------------------------------------------------------
 zfs_scrub_enabled: true
 zfs_scrub_calendar: "Sun *-*-* 03:00:00"

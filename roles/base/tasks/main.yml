@@ -17,6 +17,43 @@
         name: "{{ base_packages }}"
         state: present
 
+    - name: Keep the systemd journal across reboots
+      when: base_journald_persistent | bool
+      block:
+
+        - name: Ensure the persistent journal directory exists
+          ansible.builtin.file:
+            path: "{{ base_journald_dir }}"
+            state: directory
+            owner: root
+            group: systemd-journal
+            mode: "2755"
+          notify: base journald changed
+
+        - name: Ensure the journald drop-in directory exists
+          ansible.builtin.file:
+            path: "{{ base_journald_dropin | dirname }}"
+            state: directory
+            owner: root
+            group: root
+            mode: "0755"
+
+        - name: Deploy the persistent journal configuration
+          ansible.builtin.template:
+            src: journald-persistent.conf.j2
+            dest: "{{ base_journald_dropin }}"
+            owner: root
+            group: root
+            mode: "0644"
+          notify: base journald changed
+
+    - name: Remove the persistent journal configuration when disabled
+      ansible.builtin.file:
+        path: "{{ base_journald_dropin }}"
+        state: absent
+      when: not base_journald_persistent | bool
+      notify: base journald changed
+
     - name: Configure the common host firewall
       when: base_firewall_enabled | bool
       block:

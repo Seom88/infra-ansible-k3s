@@ -8,6 +8,15 @@ base_packages:
   - git
 
 base_time_sync_service: chronyd
+
+# Keep systemd journal entries across reboots. Without /var/log/journal and
+# Storage=persistent, only the current boot survives, which makes it impossible
+# to diagnose a USB disk that failed during a previous cold boot.
+base_journald_persistent: true
+base_journald_storage: persistent
+base_journald_dropin: /etc/systemd/journald.conf.d/99-persistent.conf
+base_journald_dir: /var/log/journal
+
 base_cgroup_v2_marker: /sys/fs/cgroup/cgroup.controllers
 
 # Common firewall owned by base: every managed node gets firewalld running,

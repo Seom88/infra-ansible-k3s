@@ -54,6 +54,12 @@
     name: "{{ zfs_packages }}"
     state: present
 
+- name: Install hdparm for pool-disk power management
+  ansible.builtin.dnf:
+    name: hdparm
+    state: present
+  when: zfs_disk_apm_enabled | bool
+
 # --- Secure Boot state --------------------------------------------------------
 - name: Read the Secure Boot state
   ansible.builtin.command: mokutil --sb-state
@@ -285,6 +291,48 @@
   register: zfs_existing_pools
   changed_when: false
   failed_when: false
+
+# --- Disk power management ---------------------------------------------------
+# Import hints point at partitions (-part1); hdparm needs the whole-disk
+# device, so strip the partition suffix and de-duplicate the result.
+- name: Collect the whole-disk paths backing the configured pools
+  ansible.builtin.set_fact:
+    zfs_apm_devices: >-
+      {{ ((zfs_pools | selectattr('devices', 'defined')
+           | map(attribute='devices') | flatten)
+          + (zfs_import_pools | selectattr('devices', 'defined')
+             | map(attribute='devices') | flatten))
+         | map('regex_replace', '-part[0-9]+$', '')
+         | unique | list }}
+  when: zfs_disk_apm_enabled | bool
+
+- name: Deploy the pool-disk power-management helper
+  ansible.builtin.template:
+    src: set-disk-apm.sh.j2
+    dest: "{{ zfs_script_dir }}/set-disk-apm.sh"
+    owner: root
+    group: root
+    mode: "0750"
+  when: zfs_disk_apm_enabled | bool
+
+- name: Deploy the pool-disk power-management udev rule
+  ansible.builtin.template:
+    src: zfs-disk-apm.rules.j2
+    dest: /etc/udev/rules.d/99-zfs-disk-apm.rules
+    owner: root
+    group: root
+    mode: "0644"
+  when: zfs_disk_apm_enabled | bool
+  notify: reload udev rules
+
+# Runtime settings are re-applied on every run: the drive does not persist the
+# standby timeout across a power cycle, so the play must not pretend `ok` means
+# the current state is already correct.
+- name: Apply APM and disable standby on the pool disks present now
+  ansible.builtin.command:
+    cmd: "{{ zfs_script_dir }}/set-disk-apm.sh"
+  changed_when: false
+  when: zfs_disk_apm_enabled | bool
 
 - name: Read the configured encrypted dataset key format
   ansible.builtin.command:

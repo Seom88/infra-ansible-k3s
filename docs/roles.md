@@ -31,6 +31,7 @@ only, no k3s payload.
 | **Runs on** | all managed nodes (`plays/base.yml`) |
 | **Asserts** | distribution in AlmaLinux family, major in `[9, 10]` |
 | **Installs** | `curl`, `tar`, `git`, `chrony` (time sync) |
+| **Journal** | keeps `/var/log/journal` and `Storage=persistent` via `base_journald_persistent` / `base_journald_storage`; handler restarts `systemd-journald` only when the drop-in or directory changes |
 | **Verifies** | cgroup v2 marker `/sys/fs/cgroup/cgroup.controllers`; records SELinux status as a fact for later roles |
 | **Common firewall** | ensures the firewall daemon (`firewalld` service) is running; opens `41641/udp` (Tailscale) in `base_firewall_zone` (`public`); trusts `tailscale0` by interface; masquerade on; validates with `firewall-cmd --check-config` before reload |
 | **Kernel command line** | merges `base_kernel_params` into `GRUB_CMDLINE_LINUX` and `/etc/kernel/cmdline` as authoritative values (existing tokens for a managed name are replaced in place, unmanaged tokens are preserved), regenerates GRUB (with `--update-bls-cmdline` on BLS hosts) and checks each exact token reached `grub.cfg`; ships `crashkernel=512M,high` + `crashkernel=0,low` for the kdump reservation (Aleph has too little usable RAM below 4G for the automatic low reservation, which makes kernel 6.12 discard the high region too) and `usbcore.quirks=0bda:9201:k` |
@@ -195,11 +196,12 @@ group so k3s-only nodes never install it.
 | --- | --- |
 | **Runs on** | `nas` (`plays/nas.yml`); only hosts listed in that inventory group |
 | **Repo** | OpenZFS `zfs-kmod` kABI repo; the signing key fingerprint is verified and the repo is managed directly with `gpgcheck=1` |
-| **Packages** | `kmod-zfs`, `zfs`, `mokutil`, `python3-dnf-plugin-post-transaction-actions`; `kernel-devel-<running>` for `sign-file` |
+| **Packages** | `kmod-zfs`, `zfs`, `mokutil`, `python3-dnf-plugin-post-transaction-actions`; `kernel-devel-<running>` for `sign-file`; `hdparm` when disk power management is enabled |
 | **Secure Boot** | generates `/var/lib/zfs-mok/{MOK.priv,MOK.der}` and signs every ZFS module; **enrolling the MOK and rebooting is manual** (see runbook) |
 | **Re-sign** | dnf `post-transaction-actions` hook on `kernel*` / `kmod-zfs*` |
 | **Pools** | `zfs_import_pools` imports named existing pools without creating/formatting; `zfs_pools` creates only explicitly configured new pools. Import `devices` are label-scanned hints and may be absent (degraded mirror); creation devices must all exist. Both require `/dev/disk/by-id/...` paths; `zfs_import_all` is off by default |
 | **Degraded recovery** | `zfs_auto_online` (default true) runs `zpool online` on every UNAVAIL member that ZFS can see again; `zfs_require_healthy` (default true) fails the play with the disk/replace diagnosis if a configured pool is still not ONLINE |
+| **Disk power** | `zfs_disk_apm_enabled` (default true) installs the `set-disk-apm.sh` helper and `/etc/udev/rules.d/99-zfs-disk-apm.rules`; sets APM `254` and standby timeout `0` on the whole disks behind `zfs_pools` / `zfs_import_pools`, both at play time and whenever udev sees a late USB enumeration |
 | **Datasets** | optional `zfs_datasets` with ZFS properties |
 | **Encrypted import** | optional Vault variable `zfs_dataset_key` is installed root-only; a systemd oneshot loads the key and mounts datasets after pool import and before `zfs-mount.service` |
 | **Scrub** | `zfs-scrub.timer`, `zfs_scrub_calendar` (Sun 03:00), `Persistent=true`; skips a running scrub and journals `zpool status -x` |

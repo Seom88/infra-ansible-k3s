@@ -1,0 +1,3 @@
+# Managed by Ansible (roles/zfs). Re-apply APM/standby after a late or warm USB
+# enumeration; the kernel names (sdX) change, the script matches by by-id path.
+ACTION=="add|change", SUBSYSTEM=="block", ENV{DEVTYPE}=="disk", KERNEL=="sd[a-z]", RUN+="{{ zfs_script_dir }}/set-disk-apm.sh /dev/%k"
