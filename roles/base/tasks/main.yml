@@ -403,3 +403,92 @@
               {{ base_kernel_params | map(attribute='name') | join(', ') }}. The kernel takes
               effect only on the next boot; reboot the node to activate it. The previous
               GRUB defaults file is kept at {{ base_grub_backup_file }}.
+
+    - name: Keep the kdump crash capture kernel armed
+      when: base_kdump_enabled | bool
+      block:
+
+        - name: Refuse to enable kdump without a crashkernel parameter
+          ansible.builtin.assert:
+            that:
+              - base_kernel_params | selectattr('name', 'equalto', 'crashkernel') | list | length > 0
+            fail_msg: >-
+              base_kdump_enabled is true but base_kernel_params has no crashkernel entry,
+              so kdump could never reserve memory. Add a crashkernel parameter or set
+              base_kdump_enabled: false.
+            quiet: true
+
+        - name: Install the kdump crash capture utilities
+          ansible.builtin.dnf:
+            name: "{{ base_kdump_packages }}"
+            state: present
+
+        # The distribution default ("yes") lets kdumpctl reset-crashkernel
+        # rewrite crashkernel= on kernel updates, replacing base_kernel_params
+        # with the range syntax that cannot reserve low memory on this node.
+        - name: Keep the crashkernel reservation under Ansible control
+          ansible.builtin.lineinfile:
+            path: "{{ base_kdump_conf_file }}"
+            regexp: '^auto_reset_crashkernel\s+'
+            line: >-
+              auto_reset_crashkernel
+              {{ 'yes' if base_kdump_auto_reset_crashkernel | bool else 'no' }}
+            state: present
+
+        - name: Read the crash memory the running kernel reserved
+          ansible.builtin.slurp:
+            src: "{{ base_kdump_crash_size_file }}"
+          register: base_kdump_crash_size_raw
+          changed_when: false
+          check_mode: false
+
+        - name: Record whether the running kernel reserved crash memory
+          ansible.builtin.set_fact:
+            base_kdump_crash_reserved: >-
+              {{ (base_kdump_crash_size_raw.content | b64decode | trim | int) > 0 }}
+
+        - name: Enable kdump to arm the capture kernel on every boot
+          ansible.builtin.systemd:
+            name: "{{ base_kdump_service }}"
+            enabled: true
+
+        # Starting before the reboot would fail with "No memory reserved for
+        # crash kernel": the on-disk configuration is applied, but the running
+        # kernel still has the old (or no) reservation.
+        - name: Start kdump once the running kernel has crash memory reserved
+          ansible.builtin.systemd:
+            name: "{{ base_kdump_service }}"
+            state: started
+          when: base_kdump_crash_reserved | bool
+
+        - name: Read whether the crash capture kernel is loaded
+          ansible.builtin.slurp:
+            src: "{{ base_kdump_loaded_file }}"
+          register: base_kdump_loaded_raw
+          changed_when: false
+          check_mode: false
+          when:
+            - base_kdump_crash_reserved | bool
+            - not ansible_check_mode
+
+        - name: Confirm kdump loaded the crash capture kernel
+          ansible.builtin.assert:
+            that:
+              - (base_kdump_loaded_raw.content | b64decode | trim) == '1'
+            fail_msg: >-
+              kdump.service started but the crash capture kernel is not loaded
+              ({{ base_kdump_loaded_file }} is not 1). Inspect 'kdumpctl status' and
+              'journalctl -u {{ base_kdump_service }}'.
+            quiet: true
+          when:
+            - base_kdump_crash_reserved | bool
+            - not ansible_check_mode
+
+        - name: Report that a reboot is required before kdump can arm
+          ansible.builtin.debug:
+            msg: >-
+              kdump is installed and enabled, but {{ base_kdump_crash_size_file }} is 0:
+              the running kernel has no crash memory reserved. Reboot the node to
+              activate the crashkernel parameters from base_kernel_params; kdump arms
+              itself on the next boot.
+          when: not base_kdump_crash_reserved | bool

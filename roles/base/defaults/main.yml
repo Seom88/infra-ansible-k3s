@@ -72,7 +72,8 @@ base_tailscale_sysctl_file: /etc/sysctl.d/99-tailscale.conf
 # "enable of device-initiated U1 failed" on that bus and xhci resets the
 # device within the same second, taking the disk off the bus. The quirk is
 # matched per vendor:product, so it only affects that bridge and never any
-# other USB device. Empty the list to stop managing the kernel command line.
+# other USB device. Empty the list to stop managing the kernel command line
+# (and set base_kdump_enabled: false, since kdump then has nothing to reserve).
 base_kernel_params:
   - name: crashkernel
     value: "512M,high"
@@ -80,6 +81,36 @@ base_kernel_params:
     value: "0,low"
   - name: usbcore.quirks
     value: "0bda:9201:k"
+
+# The command line above reserves crash memory, but the capture kernel is only
+# armed once kdump is installed and its service has started. Cockpit reports a
+# failed kdump.service as a danger alert, so base owns the whole chain instead
+# of assuming the installer left it working.
+#
+# kdump.service can only start when the *running* kernel has crash memory
+# reserved. After base introduces a new crashkernel= value the service is
+# enabled but cannot start until the node reboots; the role reports that
+# instead of failing, then verifies /sys/kernel/kexec_crash_loaded on nodes
+# that already carry the reservation.
+#
+# auto_reset_crashkernel is pinned to "no" on purpose: with "yes" (the
+# distribution default) kdumpctl rewrites crashkernel= back to the range
+# syntax on every kernel update. On Aleph the low reservation in that syntax
+# fails and the kernel then discards the high region too, silently disabling
+# kdump again. base_kernel_params is the authoritative reservation.
+base_kdump_enabled: true
+
+# AlmaLinux 9 ships kdumpctl inside kexec-tools; AlmaLinux 10 split it into
+# kdump-utils (kexec-tools still provides the kexec userspace tools).
+base_kdump_packages: >-
+  {{ ['kdump-utils'] if ansible_facts['distribution_major_version'] | int >= 10
+     else ['kexec-tools'] }}
+
+base_kdump_service: kdump.service
+base_kdump_conf_file: /etc/kdump.conf
+base_kdump_auto_reset_crashkernel: false
+base_kdump_crash_size_file: /sys/kernel/kexec_crash_size
+base_kdump_loaded_file: /sys/kernel/kexec_crash_loaded
 
 base_grub_defaults_file: /etc/default/grub
 base_grub_config_file: /boot/grub2/grub.cfg

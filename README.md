@@ -76,7 +76,7 @@ values/                   # single source of truth for both Helm charts
   cilium/values.yaml      # + values-dev.yaml overlay reference
   argocd/values.yaml      # + values-dev.yaml single-node overlay
 roles/
-  base/                   # AlmaLinux baseline: assert, curl/tar/git, chrony, facts, common firewall
+  base/                   # AlmaLinux baseline: assert, packages, chrony, facts, firewall, kdump
   k3s_prereqs/            # k3s payload: Helm + helm-diff, kernel-modules-extra, socat, k3s firewall
   kernel_modules/         # br_netfilter, overlay, sysctls, reboot-required detection
   cockpit/                # cockpit + libvirt sockets, storage pool, SELinux fcontext, own 9090 rule
