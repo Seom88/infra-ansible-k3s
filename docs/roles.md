@@ -11,7 +11,7 @@ Order on the wire:
 ```
 base → k3s (k3s_prereqs → kernel_modules → longhorn_prereqs → k3s server
        → k3s agents → cilium → argocd) → virtualization (cockpit)
-        → nas (zfs → rustfs)
+        → nas (zfs when enabled → rustfs)
 ```
 
 Firewall model: **no single firewall role.** `base` owns only the common
@@ -191,7 +191,8 @@ Key values (justification in [`architecture.md`](architecture.md)):
 ## `zfs`
 
 **Purpose:** OpenZFS on hosts that own NAS disks, applied only to the `nas`
-group so k3s-only nodes never install it.
+group and gated by `zfs_enabled` (currently `false` while Aleph's USB pool is
+retired).
 
 | | |
 | --- | --- |
@@ -215,18 +216,18 @@ design.
 
 ## `rustfs`
 
-**Purpose:** run RustFS on the host's ZFS pool, reached through a Tailscale
-sidecar, without adding a Docker daemon.
+**Purpose:** run RustFS on the host's 240 GB SSD, reached through a Tailscale
+sidecar, without adding a Docker daemon or depending on the USB/ZFS pool.
 
 | | |
 | --- | --- |
 | **Runs on** | `nas` (`plays/nas.yml`), gated by `rustfs_enabled` (false until credentials are in Vault) |
 | **Runtime** | rootful Podman Quadlet; Tailscale and RustFS share a pod network namespace |
-| **Data** | `/Data/Docker/rustfs/{data,config,ts-state}`; verifies `/Data` is mounted as ZFS before start |
+| **Data** | `/home/rustfs/{data,config,ts-state}`; verifies the path is on a dedicated `xfs`/`ext4` filesystem and not on `/` before start |
 | **Secrets** | `rustfs_ts_authkey`, `rustfs_access_key`, and `rustfs_secret_key` from the ignored Ansible Vault file; deployed only as root-owned `0600` env files with task output/diff suppressed |
 | **Tailscale** | `/dev/net/tun`, `NET_ADMIN`, `NET_RAW`, kernel networking, UDP 41642 by default (distinct from the host's Tailscale UDP 41641); existing `config/serve.json` is preserved and mounted read-only |
 | **Health/recovery** | Podman healthchecks; unhealthy containers are killed and systemd restarts their Quadlet services, replacing the Docker autoheal container |
-| **SELinux** | Tailscale state/config keep private `:Z` labels; the RustFS data mount disables label separation (`SecurityLabelDisable`) so Podman does not relabel 100k+ dataset files on every start |
+| **SELinux** | Tailscale state/config keep private `:Z` labels; the RustFS data mount disables label separation (`SecurityLabelDisable`) so Podman does not relabel the whole data tree on every start |
 | **Start timeout** | `TimeoutStartSec={{ rustfs_start_timeout }}` (300 s), above systemd's 90 s default for cold starts |
 
 The role does not install Docker or `podman-compose`; Quadlet lets systemd
@@ -260,7 +261,7 @@ of the daily cycle.
 | **Runs on** | `server` (`plays/power.yml`), deliberately not `managed_nodes`, so a standby or docker-only node never inherits the schedule |
 | **Switch** | `scheduled_shutdown_enabled` (default **true**); `false` stops, disables **and removes** both units |
 | **Installs** | `/etc/systemd/system/scheduled-shutdown.service` + `.timer` (`0644`) |
-| **Calendar** | `scheduled_shutdown_calendar` — `*-*-* 22:00:00 America/Bogota`; the zone suffix is explicit, so the host clock zone is irrelevant |
+| **Calendar** | `scheduled_shutdown_calendar` — `*-*-* 20:00:00 America/Bogota`; the zone suffix is explicit, so the host clock zone is irrelevant |
 | **Validates** | `systemd-analyze calendar` runs **before** any unit is written: a malformed expression or an unknown zone fails the play instead of arming a wrong timer |
 | **Power-off** | `Type=oneshot` → `/usr/sbin/shutdown -h now "<wall message>"`; graceful, so k3s and libvirt get their stop timeout |
 | **`Persistent=false`** | a missed window is never replayed — `Persistent=true` would power the node off right after a cold start |

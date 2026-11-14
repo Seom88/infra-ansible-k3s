@@ -1,7 +1,7 @@
 ---
 rustfs_enabled: false
 
-rustfs_data_root: /Data/Docker/rustfs
+rustfs_data_root: /home/rustfs
 rustfs_config_file: "{{ rustfs_data_root }}/config/serve.json"
 rustfs_quadlet_dir: /etc/containers/systemd
 rustfs_secret_dir: /etc/rustfs

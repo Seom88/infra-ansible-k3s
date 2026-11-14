@@ -2,7 +2,10 @@
 # OpenZFS configuration for hosts in the `nas` group.
 # The role is inert until a host is added to that group in inventory/hosts.yml.
 
-zfs_enabled: true
+# The USB/ZFS pool is retired after moving RustFS and the personal data to the
+# SSDs. Keep the pool definition below for a future reimplementation; set this
+# back to true to manage and import it again.
+zfs_enabled: false
 
 # Existing mirror previously used by the TrueNAS VM. Import it on the host;
 # do not create a new pool or format these disks.
@@ -34,9 +37,12 @@ zfs_datasets: []
 
 zfs_scrub_calendar: "Sun *-*-* 03:00:00"
 
-# RustFS uses rootful Podman Quadlet and the existing ZFS pool directories.
-# Enable only after adding credentials to the encrypted vault.yml.
+# RustFS uses rootful Podman Quadlet and lives on the 240 GB SSD, independent
+# of the USB/ZFS pool. The Velero bucket is deliberately not migrated; only
+# the durable buckets (CNPG, Loki, secrets, Terraform, Longhorn metadata) are
+# copied to the new path. Enable only after adding credentials to the
+# encrypted vault.yml.
 rustfs_enabled: true
-rustfs_data_root: /Data/Docker/rustfs
+rustfs_data_root: /home/rustfs
 rustfs_console_enable: "true"
 rustfs_console_cors_allowed_origins: "*"

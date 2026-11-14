@@ -16,19 +16,22 @@
       Set rustfs_ts_authkey, rustfs_access_key and rustfs_secret_key in the
       encrypted inventory/group_vars/nas/vault.yml before enabling RustFS.
 
-- name: Verify that the RustFS data pool is mounted as ZFS
+- name: Verify that the RustFS data path is on a dedicated filesystem
   ansible.builtin.command:
-    cmd: findmnt -rn -T {{ rustfs_data_root }} -o FSTYPE
-  register: rustfs_data_fstype
+    cmd: findmnt -rn -T {{ rustfs_data_root | dirname }} -o FSTYPE,TARGET
+  register: rustfs_data_mount
   changed_when: false
 
-- name: Refuse to start RustFS without its ZFS data pool
+- name: Refuse to start RustFS on the host root filesystem
   ansible.builtin.assert:
     that:
-      - rustfs_data_fstype.stdout | trim == 'zfs'
+      - rustfs_data_mount.stdout.split() | length == 2
+      - rustfs_data_mount.stdout.split()[0] in ['xfs', 'ext4']
+      - rustfs_data_mount.stdout.split()[1] != '/'
     fail_msg: >-
-      {{ rustfs_data_root }} is not on a mounted ZFS filesystem. Refusing to
-      start RustFS so it cannot silently write into the host root filesystem.
+      {{ rustfs_data_root }} is not on a dedicated xfs/ext4 filesystem
+      (detected: {{ rustfs_data_mount.stdout | trim }}). Refusing to start
+      RustFS so it cannot silently write into the host root filesystem.
 
 - name: Check that the existing Tailscale Serve configuration is present
   ansible.builtin.stat:

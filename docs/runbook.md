@@ -24,7 +24,7 @@ What to expect, in order:
    for the running kernel.
 5. Argo CD — installs last, `wait` up to 900 s.
 6. Virtualization play (`cockpit` on hypervisors, own `9090` rule).
-7. Power play (`scheduled_shutdown` on the server) — arms the nightly 22:00
+7. Power play (`scheduled_shutdown` on the server) — arms the nightly 20:00
    `America/Bogota` power-off; see [Nightly power-off](#nightly-power-off).
 
 > **Reboot contract:** nothing reboots itself. If a role reports `reboot required`,
@@ -163,7 +163,7 @@ nothing in the repo brings the node back.
 ```bash
 # what is armed, and when it fires next
 systemctl list-timers scheduled-shutdown.timer
-systemd-analyze calendar "*-*-* 22:00:00 America/Bogota"
+systemd-analyze calendar "*-*-* 20:00:00 America/Bogota"
 
 # cancel tonight without touching the repo
 sudo systemctl stop scheduled-shutdown.timer
@@ -184,11 +184,18 @@ a hard reset; Longhorn volumes reattach and pods restart after the next boot.
 
 ## ZFS on the host (NAS group)
 
-`plays/nas.yml` runs the `zfs` role on hosts in the `nas` group. Add the host,
-then configure existing pools to import, or new pools to create, using
-`/dev/disk/by-id/` devices. These are distinct operations: importing preserves
-the pool; `zfs_pools` invokes `zpool create` and must only be used for blank/new
-disks.
+`plays/nas.yml` runs the `zfs` role on hosts in the `nas` group when
+`zfs_enabled` is true. Add the host, then configure existing pools to import, or
+new pools to create, using `/dev/disk/by-id/` devices. These are distinct
+operations: importing preserves the pool; `zfs_pools` invokes `zpool create` and
+must only be used for blank/new disks.
+
+> **Retired 2026-11-13:** RustFS and the personal data now live on the SSDs.
+> The USB `Data` pool was exported and `zfs_enabled` is `false`; the pool
+> definition remains in `inventory/group_vars/nas/main.yml` for a future
+> reimplementation. The live `zfs-unlock-pool.service` and `zfs-scrub.timer`
+> were disabled. To bring it back, reconnect both members, set
+> `zfs_enabled: true`, and apply `plays/nas.yml`.
 
 ```bash
 ansible-playbook plays/nas.yml --check --diff   # see the plan first
@@ -275,15 +282,17 @@ ansible-playbook plays/nas.yml --ask-vault-pass
 
 Quadlet shares the pod network between `rustfs-ts` and `rustfs`; only UDP
 41642 is published on the host (41641 belongs to Aleph's host Tailscale daemon),
-while the existing Serve configuration proxies to ports 9000 and 9001. Existing data at `/Data/Docker/rustfs/data` is reused,
-not erased. Podman healthchecks with systemd restart unhealthy containers,
-replacing the Compose `autoheal` sidecar.
+while the existing Serve configuration proxies to ports 9000 and 9001. RustFS
+data now lives on the 240 GB SSD at `/home/rustfs/data`, independent of the USB
+ZFS pool; the old `/Data/Docker/rustfs` copy is retained only until the new
+location is verified. Podman healthchecks with systemd restart unhealthy
+containers, replacing the Compose `autoheal` sidecar.
 
-Boot chain: `zfs-import-cache` → `zfs-unlock-pool` → `zfs-mount` → `rustfs-pod`
-→ `rustfs-ts` → `rustfs`. The pod unit `Requires=zfs-unlock-pool.service`; each
-container unit orders itself after the mount of its volumes. Nothing runs
-`systemctl enable`: Quadlet regenerates the transient units from
-`/etc/containers/systemd` and applies their `[Install] WantedBy=` on every boot.
+Boot chain: `rustfs-pod` → `rustfs-ts` → `rustfs`. The pod unit no longer
+depends on `zfs-unlock-pool.service`; each container unit orders itself after
+the mount of its volumes. Nothing runs `systemctl enable`: Quadlet regenerates
+the transient units from `/etc/containers/systemd` and applies their
+`[Install] WantedBy=` on every boot.
 
 #### `rustfs.service` fails at boot with `result 'timeout'`
 

@@ -9,7 +9,7 @@
       - scheduled_shutdown_calendar | trim | length > 0
     fail_msg: >-
       scheduled_shutdown_calendar is empty. Set a systemd calendar expression
-      such as "*-*-* 22:00:00 America/Bogota" in
+      such as "*-*-* 20:00:00 America/Bogota" in
       roles/scheduled_shutdown/defaults/main.yml or in inventory group_vars.
     quiet: true
   # Disabling must still be able to run with the schedule cleared, otherwise the

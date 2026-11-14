@@ -5,4 +5,5 @@
 
   roles:
     - role: zfs
+      when: zfs_enabled | bool
     - role: rustfs
